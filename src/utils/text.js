@@ -68,23 +68,6 @@ export function isFieldValid(value) {
 }
 
 /**
- * Render a string that may contain **bold** markdown markers into React elements.
- * Segments wrapped in ** become <strong> elements.
- */
-export function renderBoldMarkdown(text) {
-  if (!text) return '';
-
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-
-  return parts.map((part, index) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={index} className="font-bold text-slate-800">{part.slice(2, -2)}</strong>;
-    }
-    return part;
-  });
-}
-
-/**
  * Parse a markdown string into an array of { title, content[] } sections.
  * Heading lines (# ## ###) become section titles.
  * Everything else is attached as content lines of the current section.

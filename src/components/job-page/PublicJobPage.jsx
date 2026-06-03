@@ -10,7 +10,8 @@ import {
   RefreshCw, AlertTriangle, ArrowLeft,
   Calendar, MapPin, BookOpen, Briefcase, CheckCircle2,
 } from 'lucide-react';
-import { isFieldValid, renderBoldMarkdown, parseMarkdownSections } from '../../utils/text.js';
+import { isFieldValid, parseMarkdownSections } from '../../utils/text.js';
+import { renderBoldMarkdown } from '../../utils/render.jsx';
 
 export default function PublicJobPage({ routeParams, domainConfig, onNavigate }) {
   const [job,       setJob]       = useState(null);

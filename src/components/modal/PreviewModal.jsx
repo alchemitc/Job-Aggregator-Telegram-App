@@ -3,7 +3,8 @@
 // alongside the copyable Telegram broadcast message.
 
 import { Sparkles, Laptop, Code, MessageSquare, Copy, Check } from 'lucide-react';
-import { isFieldValid, renderBoldMarkdown, parseMarkdownSections } from '../../utils/text.js';
+import { isFieldValid, parseMarkdownSections } from '../../utils/text.js';
+import { renderBoldMarkdown } from '../../utils/render.jsx';
 
 export default function PreviewModal({
   job,
