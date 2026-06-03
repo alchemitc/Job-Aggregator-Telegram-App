@@ -10,33 +10,22 @@
 //   https://elelanajobs.com/YYYY/MM/DD/slug/
 //   ▪️ Deadline : June 15th, 2026
 //
-// Prefix patterns before the real company name that must be stripped:
-//   ▪️ NGO Jobs 🎴 The Carter Center - Ethiopia 🎴
-//   ▪️ For Fresh and Exp 🎴 Metemamen Micro Financing Institution S.C 🎴
-//   ▪️ For Fresh & Exp 🎴 Yegna Microfinance Institution 🎴
-//   🚩 Call For Written Exam and Interview Session 🎴 Ethiopian Airlines 🎴  ← SKIP
-//   ▪️ Req No:60 🎴 Addis Ababa City Corridor Project 🎴                    ← SKIP
+// The definitive rule for the company name:
+//   It is always the text between the two 🎴 emoji markers.
+//   Everything before the first 🎴 is a prefix label (e.g. "For Fresh graduates",
+//   "NGO Jobs", "For Fresh and Exp", "Req No:60") and must be discarded.
+//
+// Examples:
+//   "🎴 EthioChicken 🎴"                              → "EthioChicken"
+//   "▪️For Fresh graduates🎴EthioChicken🎴"           → "EthioChicken"
+//   "▪️ NGO Jobs 🎴 The Carter Center - Ethiopia 🎴"  → "The Carter Center - Ethiopia"
+//   "▪️ For Fresh & Exp 🎴 Yegna Microfinance 🎴"     → "Yegna Microfinance Institution"
+//   "🚩 Call For Written Exam 🎴 Ethiopian Airlines 🎴" → skipped (exam post)
 
 import * as cheerio from 'cheerio';
 
-// All decoration emojis used by elelanajobs that are not part of real content
-const DECORATION_REGEX = /[🎴💧▪️🔥❤👍🥰🚩✅☑️📌📢💼🌟🔹]/gu;
-
-// Regex patterns that match prefixes appearing BEFORE the real company name.
-// Applied in order — each one is stripped if it matches the start of the string.
-const COMPANY_NAME_PREFIXES = [
-  // "For Fresh and Exp", "For Fresh & Exp", "For Experienced" etc.
-  /^for\s+(fresh\s+[&and]+\s+exp[\w]*|experienced|exp\b)[\s:.-]*/i,
-  // "NGO Jobs", "Bank Jobs", "IT Jobs", "Hotel Jobs" etc.
-  /^(ngo|government|bank|hotel|teaching|driver|it|engineering|health|finance|sales|manufacturing)\s+jobs?\s*/i,
-  // "Req No:60" or "Req No. 123"
-  /^req\.?\s*no\.?\s*\d+\s*/i,
-  // Leftover leading punctuation after all stripping
-  /^[-–—:,.\s]+/,
-];
-
-// Patterns in the message text that flag it as an exam or interview call,
-// not a regular job vacancy posting — we skip these during crawl.
+// Patterns in the message text that flag it as an exam or interview call —
+// not a regular job vacancy. These posts are skipped entirely during crawl.
 const SKIP_MESSAGE_PATTERNS = [
   /call\s+for\s+written\s+exam/i,
   /call\s+for\s+exam/i,
@@ -45,30 +34,56 @@ const SKIP_MESSAGE_PATTERNS = [
   /exam\s+schedule/i,
 ];
 
+// Characters to strip from any extracted name (leading/trailing cleanup only)
+const LEADING_NOISE_REGEX = /^[▪️🚩🔹📢💼\s\-–—:,.]+/u;
+const TRAILING_NOISE_REGEX = /[▪️🚩🔹📢💼\s\-–—:,.]+$/u;
+
 /**
- * Clean a raw company name string from a Telegram message line.
- * Removes decoration emojis, bullet markers, and known category prefixes.
+ * Extract the company name from a raw Telegram message line.
  *
- * Examples:
- *   "🎴 Ethiopian Skylight Hotel 🎴"               → "Ethiopian Skylight Hotel"
- *   "▪️ NGO Jobs 🎴 The Carter Center 🎴"          → "The Carter Center"
- *   "▪️ For Fresh and Exp 🎴 Metemamen Micro 🎴"   → "Metemamen Micro Financing Institution S.C"
- *   "▪️ For Fresh & Exp 🎴 Yegna Microfinance 🎴"  → "Yegna Microfinance Institution"
+ * Primary strategy: extract the text between the two 🎴 emoji.
+ * This is the definitive format used by elelanajobs — the real company
+ * name is always wrapped in 🎴...🎴, regardless of what comes before it.
+ *
+ * Fallback: if there are no 🎴 markers, strip decoration characters and
+ * return whatever is left (handles edge cases).
  */
 function cleanCompanyName(rawName) {
   if (!rawName) return '';
 
-  let name = rawName
-    .replace(DECORATION_REGEX, '')  // remove all decoration emojis
-    .replace(/\s+/g, ' ')           // collapse multiple spaces into one
+  // Primary: extract text between the first and second 🎴
+  // This handles ALL prefix variations at once:
+  //   "▪️For Fresh graduates🎴EthioChicken🎴"     → "EthioChicken"
+  //   "▪️ NGO Jobs 🎴 The Carter Center 🎴"       → "The Carter Center"
+  //   "🎴 Ethiopian Skylight Hotel 🎴"             → "Ethiopian Skylight Hotel"
+  //   "▪️ For Fresh & Exp 🎴 Yegna Micro 🎴"      → "Yegna Micro"
+  const between = extractBetweenMarkers(rawName, '🎴');
+  if (between) return between;
+
+  // Fallback: no 🎴 markers — strip all decoration and return what remains
+  return rawName
+    .replace(LEADING_NOISE_REGEX, '')
+    .replace(TRAILING_NOISE_REGEX, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Extract the text that sits between the first and second occurrence of
+ * a marker character. Returns empty string if fewer than two markers found.
+ */
+function extractBetweenMarkers(text, marker) {
+  const firstIndex  = text.indexOf(marker);
+  if (firstIndex === -1) return '';
+
+  const secondIndex = text.indexOf(marker, firstIndex + marker.length);
+  if (secondIndex === -1) return '';
+
+  const extracted = text
+    .substring(firstIndex + marker.length, secondIndex)
     .trim();
 
-  // Strip each prefix pattern in order
-  for (const pattern of COMPANY_NAME_PREFIXES) {
-    name = name.replace(pattern, '').trim();
-  }
-
-  return name;
+  return extracted;
 }
 
 /**
@@ -148,12 +163,12 @@ export const elelanajobsScraper = {
    * Extract clean plain text from a WordPress job detail page.
    *
    * The key challenge is handling links correctly:
-   *  - mailto: links → show the raw email address
-   *  - "Click here to apply" style links → show "CLICK HERE TO APPLY: https://..."
+   *  - mailto: links  → show the raw email address
+   *  - "Click here to apply" style links → show "TEXT: https://..."
    *  - Plain URL links → show the URL directly
    *  - Elelanajobs/t.me links → strip entirely (noise)
    *
-   * We also mark bold text with ** so the job-builder parser can identify
+   * Bold text is marked with ** so the job-builder parser can identify
    * section labels like **How To Apply**, **Required Qualification**, etc.
    */
   cleanHtmlBody($) {
@@ -214,9 +229,9 @@ export const elelanajobsScraper = {
     // Step 6: Convert all <a> links to plain text that preserves the real URL.
     //
     // Problems this solves:
-    //  a) mailto: links appear as "[email protected]" without this
-    //  b) "CLICK HERE TO APPLY" links lose their destination URL
-    //  c) elelanajobs/t.me links are noise and should be removed
+    //  a) mailto: links — extract the raw email address from the href
+    //  b) "CLICK HERE TO APPLY" links — show "TEXT: URL" so the link is not lost
+    //  c) elelanajobs/t.me links — remove entirely (watermark noise)
     //
     $clone.find('a').each((_, el) => {
       const href     = $(el).attr('href') || '';
@@ -228,13 +243,13 @@ export const elelanajobsScraper = {
         return;
       }
 
-      // Elelanajobs and t.me channel links are watermark/promo noise — remove
+      // Elelanajobs and t.me channel links are noise — strip them
       if (href.includes('elelanajobs.com') || href.includes('t.me/elelanajobs')) {
         $(el).replaceWith('');
         return;
       }
 
-      // mailto: links — extract and show the raw email address
+      // mailto: links — show the raw email address
       if (href.startsWith('mailto:')) {
         const email = href.replace('mailto:', '').trim();
         $(el).replaceWith(email || linkText);
@@ -242,14 +257,13 @@ export const elelanajobsScraper = {
       }
 
       // Regular HTTP links:
-      // If the visible text is a vague call-to-action (not the URL itself),
-      // show "TEXT: URL" so neither the instruction nor the link is lost.
-      // Example: "CLICK HERE TO APPLY" → "CLICK HERE TO APPLY: https://ethiojobs.net/..."
+      // If the visible text is a vague call-to-action (not already a URL),
+      // output "TEXT: URL" so the actual link is always captured.
+      // e.g. "CLICK HERE TO APPLY" → "CLICK HERE TO APPLY: https://ethiojobs.net/..."
       const textIsUrl = linkText.startsWith('http');
       if (linkText && !textIsUrl && linkText.toLowerCase() !== href.toLowerCase()) {
         $(el).replaceWith(`${linkText}: ${href}`);
       } else {
-        // Link text already is the URL or there is no text — just show the URL
         $(el).replaceWith(href || linkText);
       }
     });
