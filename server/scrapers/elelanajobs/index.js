@@ -2,30 +2,17 @@
 //
 // Scraper for the Elelana Jobs Telegram channel and WordPress site.
 //
-// Telegram message format observed in the channel:
-//   🎴 Company Name 🎴
-//   ▪️ Job Position-Senior HR Officer
+// Telegram message format:
+//   🎴 Company Name 🎴           ← company name always between 🎴 markers
+//   ▪️ Job Position-Title
 //   ▪️ Find More Details here
 //   💧💧💧💧💧
 //   https://elelanajobs.com/YYYY/MM/DD/slug/
 //   ▪️ Deadline : June 15th, 2026
-//
-// The definitive rule for the company name:
-//   It is always the text between the two 🎴 emoji markers.
-//   Everything before the first 🎴 is a prefix label (e.g. "For Fresh graduates",
-//   "NGO Jobs", "For Fresh and Exp", "Req No:60") and must be discarded.
-//
-// Examples:
-//   "🎴 EthioChicken 🎴"                              → "EthioChicken"
-//   "▪️For Fresh graduates🎴EthioChicken🎴"           → "EthioChicken"
-//   "▪️ NGO Jobs 🎴 The Carter Center - Ethiopia 🎴"  → "The Carter Center - Ethiopia"
-//   "▪️ For Fresh & Exp 🎴 Yegna Microfinance 🎴"     → "Yegna Microfinance Institution"
-//   "🚩 Call For Written Exam 🎴 Ethiopian Airlines 🎴" → skipped (exam post)
 
 import * as cheerio from 'cheerio';
 
-// Patterns in the message text that flag it as an exam or interview call —
-// not a regular job vacancy. These posts are skipped entirely during crawl.
+// Patterns that flag a Telegram message as an exam/interview call, not a vacancy
 const SKIP_MESSAGE_PATTERNS = [
   /call\s+for\s+written\s+exam/i,
   /call\s+for\s+exam/i,
@@ -34,33 +21,55 @@ const SKIP_MESSAGE_PATTERNS = [
   /exam\s+schedule/i,
 ];
 
-// Characters to strip from any extracted name (leading/trailing cleanup only)
-const LEADING_NOISE_REGEX = /^[▪️🚩🔹📢💼\s\-–—:,.]+/u;
+// Cleanup for fallback name extraction (no 🎴 markers)
+const LEADING_NOISE_REGEX  = /^[▪️🚩🔹📢💼\s\-–—:,.]+/u;
 const TRAILING_NOISE_REGEX = /[▪️🚩🔹📢💼\s\-–—:,.]+$/u;
+
+// ---------------------------------------------------------------------------
+// Cloudflare email decode
+// ---------------------------------------------------------------------------
+
+/**
+ * Cloudflare replaces real email addresses with obfuscated links:
+ *   <a href="/cdn-cgi/l/email-protection" data-cfemail="HEXSTRING">[email&#160;protected]</a>
+ *
+ * The HEXSTRING encodes the email using XOR with a key stored in the
+ * first two hex characters.  This function reverses that to get the
+ * real email address.
+ */
+function decodeCloudflareEmail(encodedHex) {
+  const key = parseInt(encodedHex.substring(0, 2), 16);
+  let email  = '';
+  for (let i = 2; i < encodedHex.length; i += 2) {
+    email += String.fromCharCode(parseInt(encodedHex.substring(i, i + 2), 16) ^ key);
+  }
+  return email;
+}
+
+// ---------------------------------------------------------------------------
+// Company name extraction
+// ---------------------------------------------------------------------------
 
 /**
  * Extract the company name from a raw Telegram message line.
  *
- * Primary strategy: extract the text between the two 🎴 emoji.
- * This is the definitive format used by elelanajobs — the real company
- * name is always wrapped in 🎴...🎴, regardless of what comes before it.
+ * Primary rule: the name is ALWAYS between the two 🎴 emoji markers.
+ * Everything before the first 🎴 is a prefix label and is discarded.
  *
- * Fallback: if there are no 🎴 markers, strip decoration characters and
- * return whatever is left (handles edge cases).
+ * Examples:
+ *   "🎴 Ethiopian Skylight Hotel 🎴"               → "Ethiopian Skylight Hotel"
+ *   "▪️For Fresh graduates🎴EthioChicken🎴"         → "EthioChicken"
+ *   "▪️ NGO Jobs 🎴 The Carter Center - Ethiopia 🎴"→ "The Carter Center - Ethiopia"
+ *   "▪️ For Fresh & Exp 🎴 Yegna Microfinance 🎴"   → "Yegna Microfinance Institution"
  */
 function cleanCompanyName(rawName) {
   if (!rawName) return '';
 
-  // Primary: extract text between the first and second 🎴
-  // This handles ALL prefix variations at once:
-  //   "▪️For Fresh graduates🎴EthioChicken🎴"     → "EthioChicken"
-  //   "▪️ NGO Jobs 🎴 The Carter Center 🎴"       → "The Carter Center"
-  //   "🎴 Ethiopian Skylight Hotel 🎴"             → "Ethiopian Skylight Hotel"
-  //   "▪️ For Fresh & Exp 🎴 Yegna Micro 🎴"      → "Yegna Micro"
+  // Primary: extract between the two 🎴 markers
   const between = extractBetweenMarkers(rawName, '🎴');
   if (between) return between;
 
-  // Fallback: no 🎴 markers — strip all decoration and return what remains
+  // Fallback: no markers — strip leading/trailing noise characters
   return rawName
     .replace(LEADING_NOISE_REGEX, '')
     .replace(TRAILING_NOISE_REGEX, '')
@@ -69,30 +78,29 @@ function cleanCompanyName(rawName) {
 }
 
 /**
- * Extract the text that sits between the first and second occurrence of
- * a marker character. Returns empty string if fewer than two markers found.
+ * Extract the text between the first and second occurrence of a marker string.
+ * Returns empty string if fewer than two markers are found.
  */
 function extractBetweenMarkers(text, marker) {
-  const firstIndex  = text.indexOf(marker);
-  if (firstIndex === -1) return '';
+  const first = text.indexOf(marker);
+  if (first === -1) return '';
 
-  const secondIndex = text.indexOf(marker, firstIndex + marker.length);
-  if (secondIndex === -1) return '';
+  const second = text.indexOf(marker, first + marker.length);
+  if (second === -1) return '';
 
-  const extracted = text
-    .substring(firstIndex + marker.length, secondIndex)
-    .trim();
-
-  return extracted;
+  return text.substring(first + marker.length, second).trim();
 }
 
 /**
- * Returns true when a Telegram message text is an exam or interview call
- * rather than a regular job vacancy. We skip these posts entirely during crawl.
+ * Returns true when a Telegram post is an exam or interview call, not a vacancy.
  */
 function isExamOrInterviewPost(text) {
   return SKIP_MESSAGE_PATTERNS.some((pattern) => pattern.test(text));
 }
+
+// ---------------------------------------------------------------------------
+// Scraper object
+// ---------------------------------------------------------------------------
 
 export const elelanajobsScraper = {
   id: 'elelanajobs',
@@ -100,10 +108,6 @@ export const elelanajobsScraper = {
   channelUrl: 'https://t.me/s/elelanajobs',
   domainKeyword: 'elelanajobs.com',
 
-  /**
-   * Extract the YYYY/MM/DD source date from an elelanajobs.com URL.
-   * Falls back to today's date if the URL doesn't match the expected pattern.
-   */
   extractSourceDate(url) {
     const match = url.match(/https?:\/\/elelanajobs\.com\/(\d{4})\/(\d{2})\/(\d{2})\//i);
     if (match) return `${match[1]}/${match[2]}/${match[3]}`;
@@ -115,11 +119,6 @@ export const elelanajobsScraper = {
     return `${year}/${month}/${day}`;
   },
 
-  /**
-   * Parse the Telegram channel preview HTML and return an array of job items.
-   * Each item has { text, detailUrls[] }.
-   * Exam and interview call posts are silently skipped.
-   */
   parseTelegramHtml($) {
     const scrapedItems = [];
 
@@ -129,20 +128,17 @@ export const elelanajobsScraper = {
 
       if ($bubbleTextSource.length === 0) return;
 
-      // Clone so we can mutate for text extraction without affecting DOM
       const $bubbleText = $bubbleTextSource.clone();
       $bubbleText.find('br').replaceWith('\n');
       $bubbleText.find('p, div').each((_, el) => $(el).append('\n'));
 
       const rawText = $bubbleText.text().trim();
 
-      // Skip exam and interview call posts — not real job vacancies
       if (isExamOrInterviewPost(rawText)) {
         console.log(`[scraper] Skipping exam/interview post: ${rawText.substring(0, 60)}…`);
         return;
       }
 
-      // Collect all elelanajobs.com URLs in this message
       const detailUrls = [];
       $bubbleTextSource.find('a').each((_, anchor) => {
         const href = $(anchor).attr('href');
@@ -162,22 +158,20 @@ export const elelanajobsScraper = {
   /**
    * Extract clean plain text from a WordPress job detail page.
    *
-   * The key challenge is handling links correctly:
-   *  - mailto: links  → show the raw email address
-   *  - "Click here to apply" style links → show "TEXT: https://..."
-   *  - Plain URL links → show the URL directly
-   *  - Elelanajobs/t.me links → strip entirely (noise)
-   *
-   * Bold text is marked with ** so the job-builder parser can identify
-   * section labels like **How To Apply**, **Required Qualification**, etc.
+   * Key behaviours:
+   *  1. Cloudflare-obfuscated emails (data-cfemail) are decoded to real addresses.
+   *  2. "Click here to apply" and similar vague links show "TEXT: URL".
+   *  3. External application links (ethiojobs, Google Forms, career portals)
+   *     are preserved fully.
+   *  4. Elelanajobs watermark links and t.me links are removed.
+   *  5. Bold text is marked with ** for the job-builder parser.
    */
   cleanHtmlBody($) {
-    // Step 1: Remove everything that is not job content
+    // Remove site chrome that is not job content
     $('script, style, noscript, iframe, video, audio').remove();
     $('.sharedaddy, .wpcnt, .comments-area, #comments').remove();
     $('.post-navigation, .related-posts, .you-might-also-like').remove();
 
-    // Remove "You Might Also Like" heading and all related post links below it
     $('h3').each((_, el) => {
       if ($(el).text().trim() === 'You Might Also Like') {
         $(el).nextAll().remove();
@@ -185,7 +179,6 @@ export const elelanajobsScraper = {
       }
     });
 
-    // Remove elelanajobs watermark paragraphs and Telegram promo
     $('p').each((_, el) => {
       const text = $(el).text().toLowerCase();
       if (
@@ -197,7 +190,6 @@ export const elelanajobsScraper = {
       }
     });
 
-    // Step 2: Find the main content container
     const entryContent = $('.entry-content');
     const container =
       entryContent.length > 0
@@ -210,65 +202,82 @@ export const elelanajobsScraper = {
 
     const $clone = container.clone();
 
-    // Step 3: Replace <br> with newlines
     $clone.find('br').replaceWith('\n');
-
-    // Step 4: Add newlines around block elements to preserve line structure
     $clone
       .find('p, div, li, h1, h2, h3, h4, h5, h6, tr, blockquote')
       .each((_, el) => {
         $(el).prepend('\n').append('\n');
       });
 
-    // Step 5: Mark bold text with ** so the parser recognises section headers
+    // Mark bold text with ** so the parser can identify section labels
     $clone.find('strong, b').each((_, el) => {
       const text = $(el).text().trim();
       if (text) $(el).replaceWith(`**${text}**`);
     });
 
-    // Step 6: Convert all <a> links to plain text that preserves the real URL.
+    // Convert all <a> links to plain text, preserving useful information.
     //
-    // Problems this solves:
-    //  a) mailto: links — extract the raw email address from the href
-    //  b) "CLICK HERE TO APPLY" links — show "TEXT: URL" so the link is not lost
-    //  c) elelanajobs/t.me links — remove entirely (watermark noise)
+    // Three cases:
+    //  A. Cloudflare-obfuscated email (/cdn-cgi/l/email-protection + data-cfemail)
+    //     → decode the XOR-encoded attribute to get the real email address
+    //  B. mailto: links
+    //     → strip "mailto:" and show the raw address
+    //  C. Elelanajobs/t.me watermark links
+    //     → strip entirely
+    //  D. Vague CTA links ("CLICK HERE TO APPLY", "Apply here" etc.)
+    //     → "TEXT: URL"  so the link is never lost
+    //  E. Plain URL links where text = URL
+    //     → just the URL
     //
     $clone.find('a').each((_, el) => {
       const href     = $(el).attr('href') || '';
+      const cfEmail  = $(el).attr('data-cfemail') || '';
       const linkText = $(el).text().trim();
 
-      // Internal page anchors — just keep the visible text
+      // Case A: Cloudflare email protection
+      if (cfEmail) {
+        const realEmail = decodeCloudflareEmail(cfEmail);
+        $(el).replaceWith(realEmail);
+        return;
+      }
+
+      // Internal anchors — keep visible text only
       if (!href || href.startsWith('#')) {
         $(el).replaceWith(linkText);
         return;
       }
 
-      // Elelanajobs and t.me channel links are noise — strip them
+      // Case C: elelanajobs / t.me watermark — remove
       if (href.includes('elelanajobs.com') || href.includes('t.me/elelanajobs')) {
         $(el).replaceWith('');
         return;
       }
 
-      // mailto: links — show the raw email address
+      // Cloudflare protection path without data-cfemail attribute
+      // (fall back to showing the link text, which is "[email protected]")
+      if (href.includes('/cdn-cgi/l/email-protection')) {
+        $(el).replaceWith(linkText || '');
+        return;
+      }
+
+      // Case B: mailto: link — show the raw email address
       if (href.startsWith('mailto:')) {
         const email = href.replace('mailto:', '').trim();
         $(el).replaceWith(email || linkText);
         return;
       }
 
-      // Regular HTTP links:
-      // If the visible text is a vague call-to-action (not already a URL),
-      // output "TEXT: URL" so the actual link is always captured.
-      // e.g. "CLICK HERE TO APPLY" → "CLICK HERE TO APPLY: https://ethiojobs.net/..."
-      const textIsUrl = linkText.startsWith('http');
-      if (linkText && !textIsUrl && linkText.toLowerCase() !== href.toLowerCase()) {
+      // Cases D & E: regular HTTP links
+      const textIsAlreadyUrl = linkText.startsWith('http');
+      if (linkText && !textIsAlreadyUrl && linkText.toLowerCase() !== href.toLowerCase()) {
+        // Case D: vague CTA — show "TEXT: URL"
         $(el).replaceWith(`${linkText}: ${href}`);
       } else {
+        // Case E: text is the URL or blank — just show the URL
         $(el).replaceWith(href || linkText);
       }
     });
 
-    // Step 7: Extract plain text and collapse excess blank lines
     const plainText = $clone
       .text()
       .split('\n')

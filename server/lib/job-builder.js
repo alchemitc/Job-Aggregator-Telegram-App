@@ -133,8 +133,21 @@ function isNonSkillLine(line) {
     lower.startsWith('salary') ||
     lower.startsWith('employment type') ||
     lower.startsWith('registration date') ||
-    lower.startsWith('registration place')
+    lower.startsWith('registration place') ||
+    // Reject lines that are just a URL embedded inside skill text
+    // e.g. "Time management: https://thehumancapitalhub.com/..."
+    // We keep the skill label but strip the URL-only continuation lines
+    (lower.startsWith('http') && !lower.includes('apply') && !lower.includes('form') && !lower.includes('career'))
   );
+}
+
+/**
+ * Strip any embedded URLs from a skill line, keeping only the skill label.
+ * Example: "Time management: https://thehumancapitalhub.com/..."
+ *       →  "Time management"
+ */
+function cleanSkillText(skill) {
+  return skill.replace(/:\s*https?:\/\/\S+/g, '').replace(/\s*https?:\/\/\S+/g, '').trim();
 }
 
 /**
@@ -464,8 +477,17 @@ function parseDetailPage(plainText, fallbackCompanyName) {
 
     // --- Skills list items ---
     if (currentSection === 'skills' && currentPosition) {
+      // A line containing a URL inside the skills block is actually an
+      // application link that ended up here because the page has no
+      // "How To Apply" header. Switch to apply section and store it there.
+      if (stripped.includes('http') && stripped.toLowerCase().includes('apply')) {
+        currentSection = 'apply';
+        howToApply += (howToApply ? '\n' : '') + stripped;
+        continue;
+      }
+
       if (stripped && !stripped.includes('**') && !isNonSkillLine(stripped)) {
-        currentPosition.skills.push(stripped);
+        currentPosition.skills.push(cleanSkillText(stripped));
       }
       // If it looks like a location/duty station misplaced here, capture it
       if (isLocationLine(stripped)) {
@@ -484,6 +506,15 @@ function parseDetailPage(plainText, fallbackCompanyName) {
 
     // --- How To Apply section ---
     if (currentSection === 'apply') {
+      // Stop collecting howToApply when we hit an "About Company" paragraph.
+      // Some pages append a company blurb after the apply instructions.
+      // "About AddisFly:" or "About the company:" patterns trigger this.
+      if (/^about\s+\w/i.test(stripped)) {
+        currentSection = 'about';
+        // Don't add this line to howToApply — it belongs to aboutCompany
+        continue;
+      }
+
       if (stripped) howToApply += (howToApply ? '\n' : '') + stripped;
       continue;
     }
