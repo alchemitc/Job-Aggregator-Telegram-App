@@ -8,11 +8,26 @@ Converted from TypeScript to JavaScript, with a pluggable AI provider abstractio
 cd telegram-job-scraper
 npm install
 cp .env.example .env
-# Edit .env and set your AI provider key
+# Edit .env — set your AI provider key and optionally APP_DOMAIN
 npm run dev
 ```
 
 Open http://localhost:3000
+
+### Domain configuration
+
+The `APP_DOMAIN` env variable controls what domain appears in generated job page
+URLs and Telegram broadcast messages.
+
+| Environment | `.env` setting | Result |
+|---|---|---|
+| Local dev | `APP_DOMAIN=localhost:3000` (default) | Links point to `http://localhost:3000/...` |
+| Production | `APP_DOMAIN=yourjobs.com` | Links point to `https://yourjobs.com/...` |
+
+You can also change the domain at any time from the **Settings** panel in the UI
+without touching `.env`.
+
+You can also change the server port with `PORT=4000` in `.env` if 3000 is taken.
 
 ---
 

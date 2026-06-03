@@ -2,12 +2,14 @@
 // Application entry point.
 //
 // Responsibilities:
+//  - Load .env file so environment variables are available everywhere
 //  - Create the Express app and attach middleware
 //  - Mount all API route modules
 //  - Start either the Vite dev server (development) or serve the built
 //    static files (production)
 //  - Run the one-time database repair on startup
 
+import 'dotenv/config';  // loads .env into process.env automatically
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -24,7 +26,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
 const app  = express();
-const PORT = 3000;
+
+// PORT can be set in .env — defaults to 3000 for local development.
+// If you run multiple services locally, change this to avoid conflicts.
+const PORT = parseInt(process.env.PORT || '3000', 10);
 
 // Parse JSON request bodies (up to 10 MB to handle large HTML payloads)
 app.use(express.json({ limit: '10mb' }));
@@ -78,9 +83,12 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     const { provider, model } = getProviderInfo();
-    console.log(`\n[server] Listening on http://0.0.0.0:${PORT}`);
+    const domain = process.env.APP_DOMAIN || `localhost:${PORT}`;
+
+    console.log(`\n[server] Listening on http://localhost:${PORT}`);
+    console.log(`[server] Publishing domain: ${domain}`);
     console.log(`[server] AI provider: ${provider}  |  Model: ${model}`);
-    console.log('[server] Set AI_PROVIDER env var to switch providers.\n');
+    console.log('[server] Set AI_PROVIDER in .env to switch AI providers.\n');
   });
 }
 

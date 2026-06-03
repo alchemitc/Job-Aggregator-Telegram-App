@@ -1,6 +1,12 @@
 // server/lib/db.js
 // All reading and writing of the flat-file JSON database lives here.
 // The "database" is just two JSON files: jobs.json and config.json.
+//
+// Domain seeding:
+//   On startup, if APP_DOMAIN is set in the environment, we use that as the
+//   default domain instead of the hardcoded "yourjobs.com" placeholder.
+//   This means in dev you set APP_DOMAIN=localhost:3000 and in production
+//   you set APP_DOMAIN=yourjobs.com — no code changes needed between envs.
 
 import fs from 'fs';
 import path from 'path';
@@ -15,8 +21,23 @@ const JOBS_FILE = path.join(DATA_DIR, 'jobs.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
 /**
+ * The domain we fall back to when nothing is configured yet.
+ * Reads APP_DOMAIN from the environment so you can set it per-environment:
+ *   - Dev:  APP_DOMAIN=localhost:3000
+ *   - Prod: APP_DOMAIN=yourjobs.com
+ * Falls back to "localhost:3000" if neither APP_DOMAIN nor a saved config exist.
+ */
+function getDefaultDomain() {
+  return process.env.APP_DOMAIN || 'localhost:3000';
+}
+
+/**
  * Make sure the data directory and both JSON files exist.
  * If they don't, create them with sensible defaults.
+ *
+ * If config.json already exists but still has the old "yourjobs.com" placeholder
+ * AND APP_DOMAIN is set in the environment, we overwrite the domain so the env
+ * variable takes effect without the user having to manually edit config.json.
  */
 function ensureDataFilesExist() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -28,7 +49,24 @@ function ensureDataFilesExist() {
   }
 
   if (!fs.existsSync(CONFIG_FILE)) {
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify({ domain: 'yourjobs.com' }, null, 2));
+    // First run — write config with the domain from the environment
+    const defaultConfig = { domain: getDefaultDomain() };
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(defaultConfig, null, 2));
+    console.log(`[db] Created config.json with domain: ${defaultConfig.domain}`);
+  } else if (process.env.APP_DOMAIN) {
+    // Config file already exists — if APP_DOMAIN is set, keep the env var in sync.
+    // This lets you change the domain by updating .env without touching config.json.
+    try {
+      const existing = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+      if (existing.domain !== process.env.APP_DOMAIN) {
+        existing.domain = process.env.APP_DOMAIN;
+        fs.writeFileSync(CONFIG_FILE, JSON.stringify(existing, null, 2));
+        console.log(`[db] Domain updated from APP_DOMAIN env: ${process.env.APP_DOMAIN}`);
+      }
+    } catch {
+      // If the file is corrupt, recreate it
+      fs.writeFileSync(CONFIG_FILE, JSON.stringify({ domain: getDefaultDomain() }, null, 2));
+    }
   }
 }
 
@@ -37,7 +75,8 @@ function loadConfig() {
     const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
     return JSON.parse(raw);
   } catch {
-    return { domain: 'yourjobs.com' };
+    // If the file can't be read for any reason, return the env-based default
+    return { domain: getDefaultDomain() };
   }
 }
 
