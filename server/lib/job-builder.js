@@ -88,11 +88,53 @@ function generateTelegramMessage(companyName, positions, deadline, sourceDate, s
  *     aboutCompany,
  *   }
  */
+// These are section header phrases that must NEVER be mistaken for a company name.
+// They appear as bold lines on the page but are structural labels, not names.
+const KNOWN_SECTION_HEADERS = [
+  'required qualification and experience',
+  'qualification and experience',
+  'qualifications and experience',
+  'required qualifications',
+  'requirement skill',
+  'required skills',
+  'desired skills',
+  'desired skill',
+  'key skills',
+  'core skills',
+  'competency',
+  'additional requirements',
+  'key responsibilities',
+  'duties and responsibilities',
+  'responsibilities',
+  'duties',
+  'job summary',
+  'job description',
+  'how to apply',
+  'application',
+  'about us',
+  'about the company',
+  'about the organization',
+  'background',
+  'external vacancy announcement',
+  'vacancy announcement',
+  'find more details',
+  'place of work',
+  'place of work:',
+];
+
+function isSectionHeader(text) {
+  const lower = text.toLowerCase().trim();
+  return KNOWN_SECTION_HEADERS.some((h) => lower.startsWith(h));
+}
+
 function parseDetailPage(plainText, fallbackCompanyName) {
   const lines = plainText.split('\n').map((l) => l.trim()).filter(Boolean);
 
   // --- Result object ---
-  let companyName  = '';
+  // IMPORTANT: always start with the fallback company name from Telegram.
+  // The Telegram message has the company name in the 🎴 markers which is reliable.
+  // We only override it if the detail page has something clearly better.
+  let companyName  = cleanCompanyName(fallbackCompanyName) || '';
   const positions  = [];      // array of position objects
   let location     = '';
   let deadline     = '';
@@ -209,12 +251,16 @@ function parseDetailPage(plainText, fallbackCompanyName) {
     if (/^💧+$/.test(stripped)) continue;
 
     // --- Company name ---
-    // Usually appears as the very first bold line that isn't a position header
-    if (!companyName && line.startsWith('**') && !isPositionHeader(line)) {
+    // Only try to extract the company name from the page if we don't already have
+    // one from the Telegram fallback. The page name must be a bold line that is
+    // NOT a known section header and NOT a position header.
+    if (!companyName && line.startsWith('**') && !isPositionHeader(line) && !isSectionHeader(stripped)) {
       const candidate = cleanCompanyName(stripped);
-      if (candidate && candidate.length > 2) {
+      // Sanity check: a company name should look like a proper name, not a sentence
+      const looksLikeName = candidate && candidate.length > 2 && candidate.length < 80;
+      if (looksLikeName) {
         companyName = candidate;
-        currentSection = 'about'; // text right after company name is about section
+        currentSection = 'about';
         continue;
       }
     }
@@ -240,24 +286,33 @@ function parseDetailPage(plainText, fallbackCompanyName) {
       extractFieldValue(line, 'Place of Work', 'Place of work', 'Work Place', 'Workplace', 'Duty Station', 'Duty station') ||
       extractFieldValue(line, 'Location');
     if (locationValue) {
-      location = locationValue;
+      // Strip leading dashes or hyphens that sometimes appear (e.g. "– Addis Ababa")
+      location = locationValue.replace(/^[-–—\s]+/, '').trim();
       continue;
     }
 
     // --- Deadline ---
-    if (lower.startsWith('deadline') || lower.includes('deadline :') || lower.includes('deadline:')) {
-      const deadlineValue = stripped.replace(/deadline\s*[:\-–]?\s*/i, '').trim();
+    // Match "Deadline : June 15th, 2026" or "Deadline: ..."
+    if (lower.startsWith('deadline')) {
+      const deadlineValue = stripped.replace(/^deadline\s*[:\-–]?\s*/i, '').trim();
       if (deadlineValue && deadlineValue.length > 2) {
         deadline = deadlineValue;
         continue;
       }
     }
-    // Also catch "Registration Date" style deadlines
+    // "Deadline for Applications: [June 15/2026]" — extract just the date part
+    if (lower.includes('deadline for') || lower.includes('deadline date')) {
+      const match = stripped.match(/\[?(\w+\s+\d+[\s\/,]+\d{4})\]?/);
+      if (match) {
+        deadline = match[1].trim();
+        continue;
+      }
+    }
+    // "Registration Date: June 03 to June 09, 2026" — use end date
     if (lower.includes('registration date') && lower.includes('to ')) {
-      // "Registration Date: June 03, 2026, to June 09, 2026" — use end date
       const parts = stripped.split(/\bto\b/i);
       if (parts.length > 1) {
-        deadline = parts[parts.length - 1].trim().replace(/[.,]$/, '');
+        deadline = parts[parts.length - 1].trim().replace(/[.,\]]+$/, '');
       }
     }
 

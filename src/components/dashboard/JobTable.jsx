@@ -152,10 +152,10 @@ export default function JobTable({
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[800px]">
+          <table className="w-full text-left border-collapse min-w-[900px]">
             <thead>
               <tr className="border-b border-slate-100 text-[10px] uppercase font-bold tracking-wider text-slate-400 bg-slate-50/50">
-                <th className="py-3 px-4 w-10">
+                <th className="py-3 px-3 w-8">
                   <input
                     type="checkbox"
                     checked={allVisibleSelected}
@@ -163,11 +163,11 @@ export default function JobTable({
                     className="rounded border-slate-300 text-indigo-600 cursor-pointer h-4 w-4"
                   />
                 </th>
-                <th className="py-3 px-4">Company</th>
-                <th className="py-3 px-4">Positions</th>
-                <th className="py-3 px-4">Location / Requirements</th>
-                <th className="py-3 px-4">Deadline</th>
-                <th className="py-3 px-4 text-right">Actions</th>
+                <th className="py-3 px-3 w-[180px]">Company</th>
+                <th className="py-3 px-3">Positions</th>
+                <th className="py-3 px-3 w-[170px]">Location / Edu</th>
+                <th className="py-3 px-3 w-[110px]">Deadline</th>
+                <th className="py-3 px-3 w-[200px] text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -278,7 +278,7 @@ function JobRow({
     <tr className="hover:bg-slate-50/50 transition">
 
       {/* Selection checkbox */}
-      <td className="py-4 px-4 w-10">
+      <td className="py-3 px-3 w-8">
         <input
           type="checkbox"
           checked={isSelected}
@@ -288,45 +288,45 @@ function JobRow({
       </td>
 
       {/* Company name */}
-      <td className="py-4 px-4">
-        <div className="font-bold text-slate-900 text-sm">{job.companyName}</div>
-        <span className="inline-block px-2 py-0.5 text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-150 rounded-md mt-1.5 uppercase">
-          Verified
-        </span>
+      <td className="py-3 px-3 w-[180px]">
+        <div className="font-bold text-slate-900 text-xs leading-snug">{job.companyName}</div>
       </td>
 
       {/* Job positions */}
-      <td className="py-4 px-4">
-        <ul className="space-y-1">
+      <td className="py-3 px-3">
+        <ul className="space-y-0.5">
           {job.jobPositions.map((position, idx) => (
-            <li key={idx} className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-              <span className="h-1 w-1 rounded-full bg-slate-400 shrink-0" />
+            <li key={idx} className="text-xs text-slate-700 flex items-start gap-1.5">
+              <span className="mt-1.5 h-1 w-1 rounded-full bg-slate-400 shrink-0" />
               {position}
             </li>
           ))}
         </ul>
       </td>
 
-      {/* Location and requirements summary */}
-      <td className="py-4 px-4 text-xs font-medium text-slate-500 max-w-[200px]">
-        <div className="flex items-center gap-1.5 text-slate-600 font-semibold mb-1">
-          <MapPin className="h-3.5 w-3.5 text-indigo-500" />
-          {job.location}
+      {/* Location and education summary */}
+      <td className="py-3 px-3 w-[170px]">
+        <div className="flex items-center gap-1 text-xs text-slate-600 font-medium mb-0.5">
+          <MapPin className="h-3 w-3 text-indigo-400 shrink-0" />
+          <span className="truncate">{job.location}</span>
         </div>
-        <div className="font-mono text-[10px] truncate">Edu: {job.education}</div>
-        <div className="font-mono text-[10px] truncate">Exp: {job.experience}</div>
+        {job.education && job.education !== 'Not specified' && (
+          <div className="text-[10px] text-slate-400 truncate" title={job.education}>
+            Edu: {job.education}
+          </div>
+        )}
       </td>
 
       {/* Deadline */}
-      <td className="py-4 px-4 whitespace-nowrap text-xs font-semibold text-slate-600">
-        <div className="flex items-center gap-1.5 font-bold">
-          <Calendar className="h-3.5 w-3.5 text-rose-500" />
-          {job.deadline}
+      <td className="py-3 px-3 w-[110px] text-xs text-slate-600">
+        <div className="flex items-start gap-1">
+          <Calendar className="h-3 w-3 text-rose-400 shrink-0 mt-0.5" />
+          <span className="leading-tight">{job.deadline}</span>
         </div>
       </td>
 
       {/* Action buttons — differ based on whether we're in the Trash tab */}
-      <td className="py-4 px-4 text-right whitespace-nowrap">
+      <td className="py-3 px-3 w-[200px] text-right whitespace-nowrap">
         <div className="flex items-center justify-end gap-2">
           {isTrashTab ? (
             <TrashRowActions onRestore={onRestore} onDeleteForever={onDeleteForever} />
@@ -368,48 +368,52 @@ function TrashRowActions({ onRestore, onDeleteForever }) {
 }
 
 function ActiveRowActions({ job, isPosting, onPost, onOpenPreview, onDelete, onNavigate }) {
-  const postButtonClasses = job.isPosted
-    ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-    : 'bg-slate-900 text-white border-slate-950 hover:bg-indigo-600';
-
   return (
-    <>
+    <div className="inline-flex items-center gap-1">
+      {/* Post to Telegram */}
       <button
         onClick={onPost}
         disabled={isPosting}
-        className={`p-2 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer border ${postButtonClasses}`}
-        title={job.isPosted ? 'Re-post to Telegram channel' : 'Post to Telegram channel'}
+        className={`px-2 py-1.5 rounded-lg text-[11px] font-bold transition inline-flex items-center gap-1 cursor-pointer border ${
+          job.isPosted
+            ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+            : 'bg-slate-900 text-white border-slate-900 hover:bg-indigo-600'
+        }`}
+        title={job.isPosted ? 'Re-post to Telegram' : 'Post to Telegram'}
       >
-        <Sparkles className={`h-3.5 w-3.5 ${job.isPosted ? 'text-emerald-600' : 'text-indigo-300'}`} />
+        <Sparkles className={`h-3 w-3 ${job.isPosted ? 'text-emerald-600' : 'text-indigo-300'}`} />
         {job.isPosted ? 'Re-post' : 'Post'}
       </button>
 
+      {/* Preview modal */}
       <button
         onClick={onOpenPreview}
-        className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 p-2 rounded-xl text-xs font-semibold transition inline-flex items-center gap-1"
-        title="Preview the job page and copy the Telegram message"
+        className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-[11px] font-semibold transition inline-flex items-center gap-1"
+        title="Preview job page and copy Telegram message"
       >
-        <Copy className="h-3.5 w-3.5" />
+        <Copy className="h-3 w-3" />
         Preview
       </button>
 
+      {/* Open public page */}
       <a
         href={`/${job.sourceDate}/${job.slug}/`}
         onClick={(e) => onNavigate(e, `/${job.sourceDate}/${job.slug}/`)}
-        className="bg-indigo-50 text-indigo-700 border border-indigo-150 hover:bg-indigo-100/70 p-2 rounded-xl text-xs font-semibold transition inline-flex items-center gap-1"
+        className="px-2 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 rounded-lg text-[11px] font-semibold transition inline-flex items-center gap-1"
         title="Open the public job listing page"
       >
-        <ExternalLink className="h-3.5 w-3.5" />
+        <ExternalLink className="h-3 w-3" />
         Page
       </a>
 
+      {/* Soft delete */}
       <button
         onClick={onDelete}
-        className="bg-slate-50 text-slate-400 border border-slate-200 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-100 p-2 rounded-xl transition"
+        className="p-1.5 bg-slate-50 text-slate-400 border border-slate-200 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 rounded-lg transition"
         title="Move to Recycle Bin"
       >
-        <Trash2 className="h-3.5 w-3.5" />
+        <Trash2 className="h-3 w-3" />
       </button>
-    </>
+    </div>
   );
 }
