@@ -15,7 +15,7 @@
 import * as cheerio from 'cheerio';
 import { callAI, getProviderInfo } from '../ai-providers.js';
 import { cleanEscapedNewlines, scrubExternalMentions, slugify } from './text-utils.js';
-import { cleanCompanyName, extractJobTitle } from '../scrapers/elelanajobs/index.js';
+import { cleanCompanyName } from '../scrapers/elelanajobs/index.js';
 
 const BROWSER_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -28,22 +28,25 @@ const BROWSER_USER_AGENT =
 /**
  * Build the Telegram broadcast message.
  *
- * Format:
+ * Uniform format — always the same structure regardless of source:
+ *
  *   Company Name
  *
- *   - Position One
- *   - Position Two
+ *   Position 1: Senior HR Officer
+ *   Position 2: Store Accountant
  *
  *   Deadline: June 15th, 2026
  *
  *   Find more details:
  *   https://domain.com/YYYY/MM/DD/slug/
+ *
+ * Single position uses "Position 1:" too — keeps it consistent.
  */
 function generateTelegramMessage(companyName, positions, deadline, sourceDate, slug, domain) {
   const lines = [companyName, ''];
 
-  positions.forEach((pos) => {
-    lines.push(`- ${pos}`);
+  positions.forEach((pos, index) => {
+    lines.push(`Position ${index + 1}: ${pos}`);
   });
 
   lines.push('');
@@ -88,6 +91,72 @@ function generateTelegramMessage(companyName, positions, deadline, sourceDate, s
  *     aboutCompany,
  *   }
  */
+// ---------------------------------------------------------------------------
+// Small helper functions used inside the parser
+// ---------------------------------------------------------------------------
+
+// Month names for absolute date detection
+const MONTH_NAMES = /\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i;
+
+/**
+ * Returns true if the string looks like an absolute calendar date
+ * (contains a month name or a numeric date pattern like DD/MM/YYYY).
+ */
+function looksLikeAbsoluteDate(text) {
+  return MONTH_NAMES.test(text) || /\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}/.test(text);
+}
+
+/**
+ * Try to extract an absolute date from a longer string like
+ * "Deadline for all applications: June 12th, 2026"
+ */
+function extractAbsoluteDateFromString(text) {
+  // Match patterns like "June 12th, 2026" or "12/06/2026"
+  const match = text.match(/\b([A-Z][a-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})\b/);
+  return match ? match[1].trim() : '';
+}
+
+/**
+ * Returns true if a line inside the skills section is NOT actually a skill —
+ * e.g. "Designation of Duty Station: Assosa" or other misplaced metadata.
+ */
+function isNonSkillLine(line) {
+  const lower = line.toLowerCase();
+  return (
+    lower.startsWith('designation of duty') ||
+    lower.startsWith('designation:') ||
+    lower.startsWith('place of work') ||
+    lower.startsWith('duty station') ||
+    lower.startsWith('work location') ||
+    lower.startsWith('location:') ||
+    lower.startsWith('deadline') ||
+    lower.startsWith('salary') ||
+    lower.startsWith('employment type') ||
+    lower.startsWith('registration date') ||
+    lower.startsWith('registration place')
+  );
+}
+
+/**
+ * Returns true if a line looks like a location assignment.
+ */
+function isLocationLine(line) {
+  const lower = line.toLowerCase();
+  return (
+    lower.startsWith('designation of duty') ||
+    lower.startsWith('duty station') ||
+    lower.startsWith('place of work') ||
+    lower.startsWith('location:')
+  );
+}
+
+/**
+ * Extract the location value from a line like "Designation of Duty Station: Assosa"
+ */
+function extractLocationFromLine(line) {
+  return line.split(/[:\-–]/).slice(1).join(':').trim().replace(/^[-–\s]+/, '');
+}
+
 // These are section header phrases that must NEVER be mistaken for a company name.
 // They appear as bold lines on the page but are structural labels, not names.
 const KNOWN_SECTION_HEADERS = [
@@ -131,15 +200,15 @@ function parseDetailPage(plainText, fallbackCompanyName) {
   const lines = plainText.split('\n').map((l) => l.trim()).filter(Boolean);
 
   // --- Result object ---
-  // IMPORTANT: always start with the fallback company name from Telegram.
-  // The Telegram message has the company name in the 🎴 markers which is reliable.
-  // We only override it if the detail page has something clearly better.
-  let companyName  = cleanCompanyName(fallbackCompanyName) || '';
-  const positions  = [];      // array of position objects
-  let location     = '';
-  let deadline     = '';
-  let howToApply   = '';
-  let aboutCompany = '';
+  // Always start with the Telegram fallback name — it's reliable (between 🎴 markers).
+  // We only override from the page if the page has something clearly different.
+  let companyName    = cleanCompanyName(fallbackCompanyName) || '';
+  const positions    = [];
+  let location       = '';
+  let deadline       = '';           // absolute date (e.g. "June 12th, 2026") — preferred
+  let deadlineRel    = '';           // relative date ("Ten days from ...") — fallback only
+  let howToApply     = '';
+  let aboutCompany   = '';
 
   // Parsing state machine
   let currentPosition  = null;  // position object being built
@@ -292,27 +361,38 @@ function parseDetailPage(plainText, fallbackCompanyName) {
     }
 
     // --- Deadline ---
-    // Match "Deadline : June 15th, 2026" or "Deadline: ..."
+    // Rule: absolute dates (containing a month name or DD/MM/YYYY) are always
+    // preferred over relative phrasing like "Ten days from announcement date".
+    // We collect both and pick the best one at the end.
     if (lower.startsWith('deadline')) {
-      const deadlineValue = stripped.replace(/^deadline\s*[:\-–]?\s*/i, '').trim();
-      if (deadlineValue && deadlineValue.length > 2) {
-        deadline = deadlineValue;
+      const raw = stripped.replace(/^deadline\s*[:\-–]?\s*/i, '').trim();
+      if (raw && raw.length > 2) {
+        if (looksLikeAbsoluteDate(raw)) {
+          deadline = raw;         // absolute wins immediately
+        } else if (!deadline) {
+          deadlineRel = raw;      // store relative as fallback only
+        }
         continue;
       }
     }
-    // "Deadline for Applications: [June 15/2026]" — extract just the date part
+    // "Deadline for all applications: [June 15/2026]" — these appear inside
+    // the How To Apply block. Extract absolute date if present, ignore relative.
     if (lower.includes('deadline for') || lower.includes('deadline date')) {
-      const match = stripped.match(/\[?(\w+\s+\d+[\s\/,]+\d{4})\]?/);
-      if (match) {
-        deadline = match[1].trim();
-        continue;
+      const absDate = extractAbsoluteDateFromString(stripped);
+      if (absDate && !deadline) {
+        deadline = absDate;
       }
+      // Always skip this line from being added to howToApply
+      continue;
     }
-    // "Registration Date: June 03 to June 09, 2026" — use end date
+    // "Registration Date: June 03 to June 09, 2026" — use the end date
     if (lower.includes('registration date') && lower.includes('to ')) {
       const parts = stripped.split(/\bto\b/i);
       if (parts.length > 1) {
-        deadline = parts[parts.length - 1].trim().replace(/[.,\]]+$/, '');
+        const endDate = parts[parts.length - 1].trim().replace(/[.,\]]+$/, '');
+        if (looksLikeAbsoluteDate(endDate) && !deadline) {
+          deadline = endDate;
+        }
       }
     }
 
@@ -337,7 +417,27 @@ function parseDetailPage(plainText, fallbackCompanyName) {
 
     // --- Field-value lines within the current section ---
     if (currentSection === 'qualification' && currentPosition) {
-      // Multi-line education continuation (lines that look like degree descriptions)
+      // Line starts with a bullet (·, -, •) — treat as experience/skill requirement
+      const bulletContent = stripped.replace(/^[·•\-–]\s*/, '');
+      if (stripped.match(/^[·•]\s+/) && bulletContent) {
+        // Lines with "year" or "experience" → experience
+        if (bulletContent.toLowerCase().includes('year') ||
+            bulletContent.toLowerCase().includes('experience') ||
+            bulletContent.toLowerCase().includes('clinical') ||
+            bulletContent.toLowerCase().includes('humanitarian')) {
+          if (!currentPosition.experience) {
+            currentPosition.experience = bulletContent;
+          } else {
+            currentPosition.experience += '. ' + bulletContent;
+          }
+        } else {
+          // Other bullet points in qualification block → skills
+          currentPosition.skills.push(bulletContent);
+        }
+        continue;
+      }
+
+      // Multi-line education: standalone degree mention
       if (
         !lower.startsWith('nb') &&
         (lower.includes('degree') || lower.includes('diploma') || lower.includes('bsc') ||
@@ -349,7 +449,8 @@ function parseDetailPage(plainText, fallbackCompanyName) {
         }
         continue;
       }
-      // Multi-line experience continuation
+
+      // Standalone experience line (years of experience mentioned)
       if (
         lower.includes('year') &&
         (lower.includes('experience') || lower.includes('minimum') || lower.includes('relevant'))
@@ -363,8 +464,12 @@ function parseDetailPage(plainText, fallbackCompanyName) {
 
     // --- Skills list items ---
     if (currentSection === 'skills' && currentPosition) {
-      if (stripped && !stripped.includes('**')) {
+      if (stripped && !stripped.includes('**') && !isNonSkillLine(stripped)) {
         currentPosition.skills.push(stripped);
+      }
+      // If it looks like a location/duty station misplaced here, capture it
+      if (isLocationLine(stripped)) {
+        location = location || extractLocationFromLine(stripped);
       }
       continue;
     }
@@ -395,7 +500,10 @@ function parseDetailPage(plainText, fallbackCompanyName) {
 
   // --- Post-processing ---
 
-  // If we found no company name from the page, use the fallback (from Telegram text)
+  // Deadline: prefer absolute date, fall back to relative phrase
+  if (!deadline && deadlineRel) deadline = deadlineRel;
+
+  // If we found no company name from the page, keep the fallback
   if (!companyName) companyName = cleanCompanyName(fallbackCompanyName) || 'Unknown Company';
 
   // Remove elelanajobs.com promo from howToApply
