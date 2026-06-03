@@ -3,6 +3,223 @@
 // Scraper for the Elelana Jobs Telegram channel and WordPress site.
 //
 // Telegram message format (from observing the channel):
+//   🎴 Company Name 🎴
+//   ▪️ Job Position-Senior HR Officer
+//   ▪️ Find More Details here
+//   💧💧💧💧💧
+//   https://elelanajobs.com/YYYY/MM/DD/slug/
+//   ▪️ Deadline : June 15th, 2026
+//
+// Common prefix patterns before the real company name:
+//   ▪️ NGO Jobs 🎴 The Carter Center - Ethiopia 🎴
+//   ▪️ For Fresh and Exp 🎴 Metemamen Micro Financing Institution S.C 🎴
+//   ▪️ For Fresh & Exp 🎴 Yegna Microfinance Institution 🎴
+//   🚩 Call For Written Exam and Interview Session 🎴 Ethiopian Airlines 🎴  ← SKIP these
+//   ▪️ Req No:60 🎴 Addis Ababa City Corridor Project 🎴                    ← SKIP (no position)
+
+import * as cheerio from 'cheerio';
+
+// Emoji and decorative characters to strip from names
+const DECORATION_REGEX = /[🎴💧▪️🔥❤👍🥰🚩✅☑️📌📢💼🌟🔹]/gu;
+
+// Prefix words/phrases that appear BEFORE the real company name in the Telegram message.
+// These are context tags added by elelanajobs, not part of the company name.
+// Order matters — check longer phrases first.
+const COMPANY_NAME_PREFIXES = [
+  // "For Fresh and Exp", "For Fresh & Exp", "For Experienced" etc.
+  /^for\s+(fresh\s+[&and]+\s+exp[\w]*|experienced|exp\b)[\s:.-]*/i,
+  // "NGO Jobs", "Bank Jobs", "IT Jobs", etc.
+  /^(ngo|government|bank|hotel|teaching|driver|it|engineering|health|finance|sales|manufacturing)\s+jobs?\s*/i,
+  // "Req No:60" or "Req No. 123"
+  /^req\.?\s*no\.?\s*\d+\s*/i,
+  // Any remaining leading punctuation / whitespace after stripping
+  /^[-–—:,.\s]+/,
+];
+
+// Message-level patterns that indicate this post should NOT be ingested.
+// "Call for Exam", "Interview Session" posts are not regular job vacancies.
+const SKIP_MESSAGE_PATTERNS = [
+  /call\s+for\s+written\s+exam/i,
+  /call\s+for\s+exam/i,
+  /interview\s+session/i,
+  /written\s+exam\s+and\s+interview/i,
+  /exam\s+schedule/i,
+];
+
+/**
+ * Clean a raw company name string extracted from a Telegram message line.
+ *
+ * Examples:
+ *   "🎴 Ethiopian Skylight Hotel 🎴"               → "Ethiopian Skylight Hotel"
+ *   "▪️ NGO Jobs 🎴 The Carter Center 🎴"          → "The Carter Center"
+ *   "▪️ For Fresh and Exp 🎴 Metemamen Micro 🎴"   → "Metemamen Micro"
+ *   "▪️ For Fresh & Exp 🎴 Yegna Microfinance 🎴"  → "Yegna Microfinance Institution"
+ */
+function cleanCompanyName(rawName) {
+  if (!rawName) return '';
+
+  let name = rawName
+    .replace(DECORATION_REGEX, '') // remove all decoration emojis
+    .replace(/\s+/g, ' ')          // collapse multiple spaces
+    .trim();
+
+  // Apply each prefix-stripping rule in order
+  for (const pattern of COMPANY_NAME_PREFIXES) {
+    name = name.replace(pattern, '').trim();
+  }
+
+  return name;
+}
+
+/**
+ * Returns true if a Telegram message text represents an exam/interview call
+ * rather than a regular job vacancy. We skip these entirely.
+ */
+function isExamOrInterviewPost(text) {
+  return SKIP_MESSAGE_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+export const elelanajobsScraper = {
+  id: 'elelanajobs',
+  name: 'Elelana Jobs',
+  channelUrl: 'https://t.me/s/elelanajobs',
+  domainKeyword: 'elelanajobs.com',
+
+  extractSourceDate(url) {
+    const match = url.match(/https?:\/\/elelanajobs\.com\/(\d{4})\/(\d{2})\/(\d{2})\//i);
+    if (match) return `${match[1]}/${match[2]}/${match[3]}`;
+
+    const today = new Date();
+    const year  = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day   = String(today.getDate()).padStart(2, '0');
+    return `${year}/${month}/${day}`;
+  },
+
+  parseTelegramHtml($) {
+    const scrapedItems = [];
+
+    $('.tgme_widget_message_wrap').each((_, wrapper) => {
+      const $wrap             = $(wrapper);
+      const $bubbleTextSource = $wrap.find('.tgme_widget_message_text');
+
+      if ($bubbleTextSource.length === 0) return;
+
+      const $bubbleText = $bubbleTextSource.clone();
+      $bubbleText.find('br').replaceWith('\n');
+      $bubbleText.find('p, div').each((_, el) => $(el).append('\n'));
+
+      const rawText = $bubbleText.text().trim();
+
+      // Skip exam/interview call posts — they are not job listings
+      if (isExamOrInterviewPost(rawText)) {
+        console.log(`[scraper] Skipping exam/interview post: ${rawText.substring(0, 60)}…`);
+        return;
+      }
+
+      const detailUrls = [];
+      $bubbleTextSource.find('a').each((_, anchor) => {
+        const href = $(anchor).attr('href');
+        if (href && href.includes('elelanajobs.com')) {
+          detailUrls.push(href);
+        }
+      });
+
+      if (detailUrls.length > 0) {
+        scrapedItems.push({ text: rawText, detailUrls });
+      }
+    });
+
+    return scrapedItems;
+  },
+
+  cleanHtmlBody($) {
+    $('script, style, noscript, iframe, video, audio').remove();
+    $('.sharedaddy, .wpcnt, .comments-area, #comments').remove();
+    $('.post-navigation, .related-posts, .you-might-also-like').remove();
+
+    $('h3').each((_, el) => {
+      if ($(el).text().trim() === 'You Might Also Like') {
+        $(el).nextAll().remove();
+        $(el).remove();
+      }
+    });
+
+    $('p').each((_, el) => {
+      const text = $(el).text().toLowerCase();
+      if (
+        text.includes('elelanajobs') ||
+        text.includes('join our official telegram') ||
+        text.includes('looking for jobs in ethiopia')
+      ) {
+        $(el).remove();
+      }
+    });
+
+    $('a').each((_, el) => {
+      const href = $(el).attr('href') || '';
+      if (href.includes('t.me/elelanajobs') || href.includes('elelanajobs.com/category')) {
+        $(el).remove();
+      }
+    });
+
+    const entryContent = $('.entry-content');
+    const container =
+      entryContent.length > 0
+        ? entryContent
+        : $('article').length > 0
+        ? $('article')
+        : $('body');
+
+    if (container.length === 0) return '';
+
+    const $clone = container.clone();
+    $clone.find('br').replaceWith('\n');
+    $clone
+      .find('p, div, li, h1, h2, h3, h4, h5, h6, tr, blockquote')
+      .each((_, el) => {
+        $(el).prepend('\n').append('\n');
+      });
+
+    // Wrap bold text so the parser can identify section labels
+    $clone.find('strong, b').each((_, el) => {
+      const text = $(el).text().trim();
+      if (text) $(el).replaceWith(`**${text}**`);
+    });
+
+    // Keep mailto links as plain text so we capture the actual email address
+    $clone.find('a').each((_, el) => {
+      const href = $(el).attr('href') || '';
+      const text = $(el).text().trim();
+      if (href.startsWith('mailto:')) {
+        // Replace the link element with just the email address as text
+        const email = href.replace('mailto:', '').trim();
+        $(el).replaceWith(email || text);
+      }
+    });
+
+    const plainText = $clone
+      .text()
+      .split('\n')
+      .map((line) => line.trim())
+      .reduce((acc, line) => {
+        const lastBlank = acc.length > 0 && acc[acc.length - 1] === '';
+        if (line === '' && lastBlank) return acc;
+        return [...acc, line];
+      }, [])
+      .join('\n')
+      .trim();
+
+    return plainText;
+  },
+};
+
+export { cleanCompanyName, isExamOrInterviewPost };
+
+//
+// Scraper for the Elelana Jobs Telegram channel and WordPress site.
+//
+// Telegram message format (from observing the channel):
 //   🎴 Company Name 🎴             ← company name wrapped in 🎴 emoji
 //   ▪️ Job Position-Senior HR Officer
 //   ▪️ Job Position-2 Store Keeper
