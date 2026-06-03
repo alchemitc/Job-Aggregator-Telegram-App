@@ -147,19 +147,22 @@ export const elelanajobsScraper = {
   /**
    * Extract clean plain text from a WordPress job detail page.
    *
-   * Steps:
-   *  1. Remove all site chrome (scripts, nav, comments, related posts, watermarks)
-   *  2. Convert mailto: links to plain email addresses so they show in text
-   *  3. Mark bold text with ** so the job builder can identify section labels
-   *  4. Extract and clean the plain text content
+   * The key challenge is handling links correctly:
+   *  - mailto: links → show the raw email address
+   *  - "Click here to apply" style links → show "CLICK HERE TO APPLY: https://..."
+   *  - Plain URL links → show the URL directly
+   *  - Elelanajobs/t.me links → strip entirely (noise)
+   *
+   * We also mark bold text with ** so the job-builder parser can identify
+   * section labels like **How To Apply**, **Required Qualification**, etc.
    */
   cleanHtmlBody($) {
-    // Remove everything that is not job content
+    // Step 1: Remove everything that is not job content
     $('script, style, noscript, iframe, video, audio').remove();
     $('.sharedaddy, .wpcnt, .comments-area, #comments').remove();
     $('.post-navigation, .related-posts, .you-might-also-like').remove();
 
-    // Remove "You Might Also Like" heading and all the related post links below it
+    // Remove "You Might Also Like" heading and all related post links below it
     $('h3').each((_, el) => {
       if ($(el).text().trim() === 'You Might Also Like') {
         $(el).nextAll().remove();
@@ -167,7 +170,7 @@ export const elelanajobsScraper = {
       }
     });
 
-    // Remove elelanajobs watermark paragraphs and Telegram channel promo
+    // Remove elelanajobs watermark paragraphs and Telegram promo
     $('p').each((_, el) => {
       const text = $(el).text().toLowerCase();
       if (
@@ -179,15 +182,7 @@ export const elelanajobsScraper = {
       }
     });
 
-    // Remove elelanajobs category and channel links
-    $('a').each((_, el) => {
-      const href = $(el).attr('href') || '';
-      if (href.includes('t.me/elelanajobs') || href.includes('elelanajobs.com/category')) {
-        $(el).remove();
-      }
-    });
-
-    // Find the main content container (WordPress standard is .entry-content)
+    // Step 2: Find the main content container
     const entryContent = $('.entry-content');
     const container =
       entryContent.length > 0
@@ -200,41 +195,71 @@ export const elelanajobsScraper = {
 
     const $clone = container.clone();
 
-    // Replace <br> tags with newlines before text extraction
+    // Step 3: Replace <br> with newlines
     $clone.find('br').replaceWith('\n');
 
-    // Add newlines around block elements so the text keeps its structure
+    // Step 4: Add newlines around block elements to preserve line structure
     $clone
       .find('p, div, li, h1, h2, h3, h4, h5, h6, tr, blockquote')
       .each((_, el) => {
         $(el).prepend('\n').append('\n');
       });
 
-    // Wrap bold text with ** so the parser can identify field labels like
-    // **How To Apply**, **Required Qualification and Experience**, etc.
+    // Step 5: Mark bold text with ** so the parser recognises section headers
     $clone.find('strong, b').each((_, el) => {
       const text = $(el).text().trim();
       if (text) $(el).replaceWith(`**${text}**`);
     });
 
-    // Convert mailto: links to plain email text so the actual email address
-    // shows up in the extracted content instead of "[email protected]"
+    // Step 6: Convert all <a> links to plain text that preserves the real URL.
+    //
+    // Problems this solves:
+    //  a) mailto: links appear as "[email protected]" without this
+    //  b) "CLICK HERE TO APPLY" links lose their destination URL
+    //  c) elelanajobs/t.me links are noise and should be removed
+    //
     $clone.find('a').each((_, el) => {
-      const href = $(el).attr('href') || '';
+      const href     = $(el).attr('href') || '';
       const linkText = $(el).text().trim();
+
+      // Internal page anchors — just keep the visible text
+      if (!href || href.startsWith('#')) {
+        $(el).replaceWith(linkText);
+        return;
+      }
+
+      // Elelanajobs and t.me channel links are watermark/promo noise — remove
+      if (href.includes('elelanajobs.com') || href.includes('t.me/elelanajobs')) {
+        $(el).replaceWith('');
+        return;
+      }
+
+      // mailto: links — extract and show the raw email address
       if (href.startsWith('mailto:')) {
         const email = href.replace('mailto:', '').trim();
         $(el).replaceWith(email || linkText);
+        return;
+      }
+
+      // Regular HTTP links:
+      // If the visible text is a vague call-to-action (not the URL itself),
+      // show "TEXT: URL" so neither the instruction nor the link is lost.
+      // Example: "CLICK HERE TO APPLY" → "CLICK HERE TO APPLY: https://ethiojobs.net/..."
+      const textIsUrl = linkText.startsWith('http');
+      if (linkText && !textIsUrl && linkText.toLowerCase() !== href.toLowerCase()) {
+        $(el).replaceWith(`${linkText}: ${href}`);
+      } else {
+        // Link text already is the URL or there is no text — just show the URL
+        $(el).replaceWith(href || linkText);
       }
     });
 
-    // Extract plain text and clean up blank lines
+    // Step 7: Extract plain text and collapse excess blank lines
     const plainText = $clone
       .text()
       .split('\n')
       .map((line) => line.trim())
       .reduce((acc, line) => {
-        // Collapse consecutive blank lines into a single blank line
         const lastWasBlank = acc.length > 0 && acc[acc.length - 1] === '';
         if (line === '' && lastWasBlank) return acc;
         return [...acc, line];
