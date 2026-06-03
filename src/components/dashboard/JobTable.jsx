@@ -165,9 +165,9 @@ export default function JobTable({
                 </th>
                 <th className="py-3 px-3 w-[180px]">Company</th>
                 <th className="py-3 px-3">Positions</th>
-                <th className="py-3 px-3 w-[170px]">Location / Edu</th>
+                <th className="py-3 px-3 w-[130px]">Location</th>
                 <th className="py-3 px-3 w-[110px]">Deadline</th>
-                <th className="py-3 px-3 w-[200px] text-right">Actions</th>
+                <th className="py-3 px-3 w-[210px] text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -304,17 +304,12 @@ function JobRow({
         </ul>
       </td>
 
-      {/* Location and education summary */}
-      <td className="py-3 px-3 w-[170px]">
-        <div className="flex items-center gap-1 text-xs text-slate-600 font-medium mb-0.5">
+      {/* Location only — education removed from table to prevent column overflow */}
+      <td className="py-3 px-3 w-[130px]">
+        <div className="flex items-center gap-1 text-xs text-slate-600 font-medium">
           <MapPin className="h-3 w-3 text-indigo-400 shrink-0" />
-          <span className="truncate">{job.location}</span>
+          <span className="truncate max-w-[110px]" title={job.location}>{job.location}</span>
         </div>
-        {job.education && job.education !== 'Not specified' && (
-          <div className="text-[10px] text-slate-400 truncate" title={job.education}>
-            Edu: {job.education}
-          </div>
-        )}
       </td>
 
       {/* Deadline */}
