@@ -7,6 +7,7 @@
 //  - Cards show whether a URL is new, already saved (active), or in the trash
 //  - The button count shows how many new items would actually be ingested
 
+import { useState } from 'react';
 import { RefreshCw, CheckCircle, Briefcase, ExternalLink, Sparkles, AlertTriangle } from 'lucide-react';
 import { parseTelegramText } from '../../utils/telegram-parser.js';
 
@@ -123,7 +124,7 @@ export default function ScraperPanel({
 
       {/* Results list, "nothing new" notice, or empty state */}
       {crawledButNothingNew ? (
-        <NothingNewState totalFound={scraperMeta.totalFound} onCrawl={onCrawl} />
+        <NothingNewState totalFound={scraperMeta.totalFound} scraperId={selectedScraperId} onCrawl={onCrawl} />
       ) : scraperItems.length === 0 ? (
         <EmptyScraperState isLoading={isScrapingChannel} />
       ) : (
@@ -148,7 +149,26 @@ export default function ScraperPanel({
 // Empty / loading state
 // ---------------------------------------------------------------------------
 
-function NothingNewState({ totalFound, onCrawl }) {
+function NothingNewState({ totalFound, scraperId, onCrawl }) {
+  const [resetting, setResetting] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
+
+  async function handleReset() {
+    setResetting(true);
+    try {
+      await fetch('/api/scrape/checkpoint/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scraperId }),
+      });
+      setResetDone(true);
+    } catch {
+      // ignore
+    } finally {
+      setResetting(false);
+    }
+  }
+
   return (
     <div className="text-center py-10 border border-dashed border-emerald-200 rounded-xl bg-emerald-50/30">
       <div className="text-2xl mb-2">✓</div>
@@ -157,12 +177,29 @@ function NothingNewState({ totalFound, onCrawl }) {
         No new posts since the last crawl.
         {totalFound > 0 && ` (${totalFound} post(s) on the channel page, all already ingested.)`}
       </p>
-      <button
-        onClick={onCrawl}
-        className="mt-4 px-4 py-1.5 text-xs font-semibold bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition"
-      >
-        Check again
-      </button>
+      <div className="flex items-center justify-center gap-2 mt-4">
+        <button
+          onClick={onCrawl}
+          className="px-4 py-1.5 text-xs font-semibold bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition"
+        >
+          Check again
+        </button>
+        {/* Reset checkpoint — useful after clearing the DB for testing */}
+        {!resetDone ? (
+          <button
+            onClick={handleReset}
+            disabled={resetting}
+            title="Clears the checkpoint so the next crawl shows all messages again. Use after deleting all jobs for testing."
+            className="px-4 py-1.5 text-xs font-semibold bg-white border border-amber-200 rounded-lg text-amber-600 hover:bg-amber-50 transition disabled:opacity-50"
+          >
+            {resetting ? 'Resetting…' : 'Reset checkpoint'}
+          </button>
+        ) : (
+          <span className="text-xs text-emerald-600 font-medium">
+            ✓ Reset — crawl again to see all posts
+          </span>
+        )}
+      </div>
     </div>
   );
 }

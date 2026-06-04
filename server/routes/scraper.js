@@ -120,8 +120,21 @@ router.post('/checkpoint', (req, res) => {
   res.json({ success: true, checkpoint: config.lastSeenMessageId[scraperId] });
 });
 
-// ---------------------------------------------------------------------------
-// POST /api/scrape/detail
+// POST /api/scrape/checkpoint/reset
+// Clears the checkpoint for a scraper so the next crawl returns all
+// messages on the channel page again. Used for testing or after clearing the DB.
+router.post('/checkpoint/reset', (req, res) => {
+  const { scraperId = 'elelanajobs' } = req.body;
+  const config = loadConfig();
+  if (config.lastSeenMessageId) {
+    delete config.lastSeenMessageId[scraperId];
+    saveConfig(config);
+  }
+  console.log(`[scraper] Checkpoint reset for ${scraperId}`);
+  res.json({ success: true, message: `Checkpoint cleared for ${scraperId}. Next crawl will show all messages.` });
+});
+
+
 // ---------------------------------------------------------------------------
 router.post('/detail', async (req, res) => {
   const { url, fallbackText } = req.body;
