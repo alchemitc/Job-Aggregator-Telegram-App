@@ -116,8 +116,11 @@ export function useAppState() {
     }
   }
 
-  async function fetchJobs() {
-    setIsLoadingJobs(true);
+  async function fetchJobs({ showSpinner = true } = {}) {
+    // showSpinner = true only on initial page load.
+    // Background refreshes (after ingest, after post) pass showSpinner=false
+    // so the table doesn't go blank and re-appear on every operation.
+    if (showSpinner) setIsLoadingJobs(true);
     try {
       const res = await fetch('/api/jobs');
       if (res.ok) {
@@ -127,7 +130,7 @@ export function useAppState() {
     } catch {
       // Silently ignore
     } finally {
-      setIsLoadingJobs(false);
+      if (showSpinner) setIsLoadingJobs(false);
     }
   }
 
@@ -155,7 +158,7 @@ export function useAppState() {
         setTelegramBotToken(data.config.telegramBotToken || '');
         setTelegramChatId(data.config.telegramChatId || '');
         addLog('Configuration saved successfully.');
-        fetchJobs();
+        fetchJobs({ showSpinner: false });
       }
     } catch {
       addLog('Error: could not save configuration.');
@@ -195,9 +198,9 @@ export function useAppState() {
     }
   }
 
-  async function ingestSingleJob(url, fallbackText) {
+  async function ingestSingleJob(url, fallbackText, { silent = false } = {}) {
     setProcessingUrls((prev) => ({ ...prev, [url]: true }));
-    addLog(`Fetching detail page: ${url}`);
+    if (!silent) addLog(`Fetching detail page: ${url}`);
 
     try {
       const res = await fetch('/api/scrape/detail', {
@@ -209,12 +212,22 @@ export function useAppState() {
       if (res.ok) {
         const data = await res.json();
         addLog(`Saved: ${data.job.companyName}`);
-        fetchJobs();
+
+        // Append the new job directly to state — no full reload needed.
+        // This avoids the isLoadingJobs flicker on every single ingest.
+        setJobs((prev) => {
+          const withoutDuplicate = prev.filter((j) => j.sourceUrl !== url);
+          return sortJobsByDate([...withoutDuplicate, fixEscapedNewlines(data.job)]);
+        });
+
+        return data.job; // return so the caller knows it succeeded
       } else {
         addLog(`Failed to ingest: ${url}`);
+        return null;
       }
     } catch (err) {
       addLog(`Error ingesting job: ${err.message}`);
+      return null;
     } finally {
       setProcessingUrls((prev) => ({ ...prev, [url]: false }));
     }
@@ -222,15 +235,21 @@ export function useAppState() {
 
   async function ingestAllDiscovered() {
     addLog('Starting batch ingest of all new listings…');
+    let count = 0;
+
     for (const item of scraperItems) {
       for (const url of item.detailUrls) {
         const alreadySaved = jobs.some((j) => j.sourceUrl === url);
         if (!alreadySaved && !processingUrls[url]) {
-          await ingestSingleJob(url, item.text);
+          const result = await ingestSingleJob(url, item.text, { silent: true });
+          if (result) count++;
         }
       }
     }
-    addLog('Batch ingest complete.');
+
+    // One single silent reload at the end to sync with server state
+    await fetchJobs({ showSpinner: false });
+    addLog(`Batch ingest complete — ${count} new job(s) added.`);
   }
 
   // ---------------------------------------------------------------------------
@@ -311,12 +330,8 @@ export function useAppState() {
         const successCount = data.results.filter((r) => r.success).length;
         addLog(`Telegram: ${successCount} of ${ids.length} post(s) sent successfully.`);
 
-        // Reload jobs to reflect the updated isPosted status
-        const reloadRes = await fetch('/api/jobs');
-        if (reloadRes.ok) {
-          const freshJobs = await reloadRes.json();
-          setJobs(sortJobsByDate(freshJobs.map(fixEscapedNewlines)));
-        }
+        // Silently refresh to reflect updated isPosted status
+        fetchJobs({ showSpinner: false });
 
         setSelectedJobIds([]);
       } else {
