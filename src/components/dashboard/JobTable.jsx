@@ -61,7 +61,14 @@ export default function JobTable({
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-150 pb-5 mb-6">
         <div>
           <h2 className="text-md font-bold text-slate-900">Job Board Database</h2>
-          <p className="text-xs text-slate-400">Manage, audit, preview, and post job listings.</p>
+          <p className="text-xs text-slate-400">
+            Manage, audit, preview, and post job listings.
+            {' '}Jobs with a{' '}
+            <span className="inline-flex items-center gap-0.5 px-1 py-0.5 text-[9px] font-bold rounded bg-amber-50 text-amber-700 border border-amber-200">
+              ✦ AI filled
+            </span>
+            {' '}badge under the company name had missing fields filled by AI — review those manually.
+          </p>
         </div>
 
         <div className="relative">
