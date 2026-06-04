@@ -134,6 +134,7 @@ function isNonSkillLine(line) {
     lower.startsWith('employment type') ||
     lower.startsWith('registration date') ||
     lower.startsWith('registration place') ||
+    lower.startsWith('duty stations') ||
     // Reject lines that are just a URL embedded inside skill text
     // e.g. "Time management: https://thehumancapitalhub.com/..."
     // We keep the skill label but strip the URL-only continuation lines
@@ -157,7 +158,7 @@ function isLocationLine(line) {
   const lower = line.toLowerCase();
   return (
     lower.startsWith('designation of duty') ||
-    lower.startsWith('duty station') ||
+    lower.startsWith('duty station') ||   // covers both singular and plural
     lower.startsWith('place of work') ||
     lower.startsWith('location:')
   );
@@ -206,6 +207,12 @@ const KNOWN_SECTION_HEADERS = [
   'application procedure',
   'application address',
   'application deadline',
+  'application link',
+  'apply here',
+  'apply now',
+  'important notes',
+  'important note',
+  'duty stations',
 ];
 
 function isSectionHeader(text) {
@@ -276,8 +283,13 @@ function parseDetailPage(plainText, fallbackCompanyName) {
 
     if (
       clean.startsWith('how to apply') ||
-      clean.startsWith('application process') ||   // ← Mirab-style header
+      clean.startsWith('application process') ||   // Mirab Construction style
       clean.startsWith('application procedure') ||
+      clean.startsWith('application link') ||       // Rammis Bank style
+      clean.startsWith('apply here') ||
+      clean.startsWith('apply now') ||
+      clean.startsWith('important notes') ||        // Important Notes after apply link
+      clean.startsWith('important note') ||
       clean === 'application'
     ) return 'apply';
 
@@ -371,10 +383,11 @@ function parseDetailPage(plainText, fallbackCompanyName) {
 
     // --- Location ---
     const locationValue =
-      extractFieldValue(line, 'Place of Work', 'Place of work', 'Work Place', 'Workplace', 'Duty Station', 'Duty station') ||
+      extractFieldValue(line, 'Place of Work', 'Place of work', 'Work Place', 'Workplace') ||
+      extractFieldValue(line, 'Duty Station', 'Duty station', 'Duty Stations', 'Duty stations') ||
       extractFieldValue(line, 'Location');
     if (locationValue) {
-      // Strip leading dashes or hyphens that sometimes appear (e.g. "– Addis Ababa")
+      // Strip leading dashes or hyphens (e.g. "– Addis Ababa")
       location = locationValue.replace(/^[-–—\s]+/, '').trim();
       continue;
     }
@@ -418,10 +431,15 @@ function parseDetailPage(plainText, fallbackCompanyName) {
       }
     }
 
-    // --- Application Address / Telephone — start or extend apply section ---
-    // "Application Address:" is a plain-text trigger (not bold) used by some
-    // pages (e.g. Mirab Construction) instead of a "How To Apply" header.
-    if (lower.startsWith('application address') || lower.startsWith('telephone')) {
+    // --- Plain-text apply triggers (not bold, so getSectionType won't catch them) ---
+    // These labels appear as regular text but signal the start of how-to-apply content.
+    if (
+      lower.startsWith('application address') ||
+      lower.startsWith('application link') ||
+      lower.startsWith('telephone') ||
+      lower.startsWith('tel:') ||
+      lower.startsWith('phone:')
+    ) {
       currentSection = 'apply';
       howToApply += (howToApply ? '\n' : '') + stripped;
       continue;
