@@ -539,17 +539,28 @@ function parseDetailPage(plainText, fallbackCompanyName) {
   if (!companyName) companyName = cleanCompanyName(fallbackCompanyName) || 'Unknown Company';
 
   // Derive top-level location from positions if not already set.
-  // If all positions share the same location, use it as the top-level.
-  // If they differ, join them so the reader sees all cities.
-  // If no position has a location either, leave it empty — never default to Addis Ababa.
+  //
+  // Three cases:
+  //  1. All positions share the same city → show it at the top level.
+  //     The per-position location is redundant, so we clear it from each
+  //     position (the top bar covers it).
+  //  2. Positions have different cities → leave top-level empty.
+  //     Each position block will show its own 📍 city.
+  //  3. No position has a location → top-level stays empty (unknown).
+  //
+  // We never default to 'Addis Ababa' — an unknown location is better
+  // than a wrong one.
   if (!location && positions.length > 0) {
     const posLocations = [...new Set(positions.map((p) => p.location).filter(Boolean))];
+
     if (posLocations.length === 1) {
+      // All same city — promote to top level and clear the redundant per-position values
       location = posLocations[0];
-    } else if (posLocations.length > 1) {
-      location = posLocations.join(', ');
+      positions.forEach((p) => { p.location = ''; });
     }
-    // If still empty after checking positions, leave it as '' — not 'Addis Ababa'
+    // If posLocations.length > 1 (different cities): leave location = ''
+    // Each position keeps its own city and shows it in its own block.
+    // If posLocations.length === 0: no location known — leave location = ''
   }
 
   howToApply = howToApply
