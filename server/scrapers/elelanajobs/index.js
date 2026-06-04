@@ -119,8 +119,9 @@ export const elelanajobsScraper = {
 
       if ($bubbleTextSource.length === 0) return;
 
-      // Extract the Telegram message ID from data-post="elelanajobs/12345"
-      const dataPost  = $wrap.attr('data-post') || '';
+      // data-post is on the INNER .tgme_widget_message div, not the outer wrap
+      const $inner    = $wrap.find('.tgme_widget_message[data-post]');
+      const dataPost  = $inner.attr('data-post') || '';
       const messageId = parseInt(dataPost.split('/').pop(), 10) || 0;
 
       const $bubbleText = $bubbleTextSource.clone();
