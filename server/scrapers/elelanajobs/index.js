@@ -9,6 +9,10 @@
 //   💧💧💧💧💧
 //   https://elelanajobs.com/YYYY/MM/DD/slug/
 //   ▪️ Deadline : June 15th, 2026
+//
+// Each message also has a numeric message ID in data-post="elelanajobs/21894".
+// This is used as a checkpoint — we only return messages newer than the last
+// seen ID, so repeated crawls don't bring back already-processed posts.
 
 import * as cheerio from 'cheerio';
 
@@ -30,12 +34,8 @@ const TRAILING_NOISE_REGEX = /[▪️🚩🔹📢💼\s\-–—:,.]+$/u;
 // ---------------------------------------------------------------------------
 
 /**
- * Cloudflare replaces real email addresses with obfuscated links:
- *   <a href="/cdn-cgi/l/email-protection" data-cfemail="HEXSTRING">[email&#160;protected]</a>
- *
- * The HEXSTRING encodes the email using XOR with a key stored in the
- * first two hex characters.  This function reverses that to get the
- * real email address.
+ * Decodes a Cloudflare-obfuscated email address.
+ * The hex string XORs each byte against the key stored in the first two chars.
  */
 function decodeCloudflareEmail(encodedHex) {
   const key = parseInt(encodedHex.substring(0, 2), 16);
@@ -52,24 +52,15 @@ function decodeCloudflareEmail(encodedHex) {
 
 /**
  * Extract the company name from a raw Telegram message line.
- *
- * Primary rule: the name is ALWAYS between the two 🎴 emoji markers.
+ * The name is ALWAYS between the two 🎴 emoji markers.
  * Everything before the first 🎴 is a prefix label and is discarded.
- *
- * Examples:
- *   "🎴 Ethiopian Skylight Hotel 🎴"               → "Ethiopian Skylight Hotel"
- *   "▪️For Fresh graduates🎴EthioChicken🎴"         → "EthioChicken"
- *   "▪️ NGO Jobs 🎴 The Carter Center - Ethiopia 🎴"→ "The Carter Center - Ethiopia"
- *   "▪️ For Fresh & Exp 🎴 Yegna Microfinance 🎴"   → "Yegna Microfinance Institution"
  */
 function cleanCompanyName(rawName) {
   if (!rawName) return '';
 
-  // Primary: extract between the two 🎴 markers
   const between = extractBetweenMarkers(rawName, '🎴');
   if (between) return between;
 
-  // Fallback: no markers — strip leading/trailing noise characters
   return rawName
     .replace(LEADING_NOISE_REGEX, '')
     .replace(TRAILING_NOISE_REGEX, '')
@@ -77,23 +68,14 @@ function cleanCompanyName(rawName) {
     .trim();
 }
 
-/**
- * Extract the text between the first and second occurrence of a marker string.
- * Returns empty string if fewer than two markers are found.
- */
 function extractBetweenMarkers(text, marker) {
   const first = text.indexOf(marker);
   if (first === -1) return '';
-
   const second = text.indexOf(marker, first + marker.length);
   if (second === -1) return '';
-
   return text.substring(first + marker.length, second).trim();
 }
 
-/**
- * Returns true when a Telegram post is an exam or interview call, not a vacancy.
- */
 function isExamOrInterviewPost(text) {
   return SKIP_MESSAGE_PATTERNS.some((pattern) => pattern.test(text));
 }
@@ -119,6 +101,15 @@ export const elelanajobsScraper = {
     return `${year}/${month}/${day}`;
   },
 
+  /**
+   * Parse the Telegram channel preview HTML.
+   *
+   * Returns an array of items, each with:
+   *   { text, detailUrls, messageId }
+   *
+   * messageId is the numeric Telegram message ID extracted from data-post.
+   * The caller uses this to filter out already-seen messages.
+   */
   parseTelegramHtml($) {
     const scrapedItems = [];
 
@@ -128,6 +119,10 @@ export const elelanajobsScraper = {
 
       if ($bubbleTextSource.length === 0) return;
 
+      // Extract the Telegram message ID from data-post="elelanajobs/12345"
+      const dataPost  = $wrap.attr('data-post') || '';
+      const messageId = parseInt(dataPost.split('/').pop(), 10) || 0;
+
       const $bubbleText = $bubbleTextSource.clone();
       $bubbleText.find('br').replaceWith('\n');
       $bubbleText.find('p, div').each((_, el) => $(el).append('\n'));
@@ -135,7 +130,7 @@ export const elelanajobsScraper = {
       const rawText = $bubbleText.text().trim();
 
       if (isExamOrInterviewPost(rawText)) {
-        console.log(`[scraper] Skipping exam/interview post: ${rawText.substring(0, 60)}…`);
+        console.log(`[scraper] Skipping exam/interview post #${messageId}: ${rawText.substring(0, 50)}…`);
         return;
       }
 
@@ -148,7 +143,7 @@ export const elelanajobsScraper = {
       });
 
       if (detailUrls.length > 0) {
-        scrapedItems.push({ text: rawText, detailUrls });
+        scrapedItems.push({ text: rawText, detailUrls, messageId });
       }
     });
 
@@ -157,17 +152,8 @@ export const elelanajobsScraper = {
 
   /**
    * Extract clean plain text from a WordPress job detail page.
-   *
-   * Key behaviours:
-   *  1. Cloudflare-obfuscated emails (data-cfemail) are decoded to real addresses.
-   *  2. "Click here to apply" and similar vague links show "TEXT: URL".
-   *  3. External application links (ethiojobs, Google Forms, career portals)
-   *     are preserved fully.
-   *  4. Elelanajobs watermark links and t.me links are removed.
-   *  5. Bold text is marked with ** for the job-builder parser.
    */
   cleanHtmlBody($) {
-    // Remove site chrome that is not job content
     $('script, style, noscript, iframe, video, audio').remove();
     $('.sharedaddy, .wpcnt, .comments-area, #comments').remove();
     $('.post-navigation, .related-posts, .you-might-also-like').remove();
@@ -209,103 +195,57 @@ export const elelanajobsScraper = {
         $(el).prepend('\n').append('\n');
       });
 
-    // ── Step 5a: Decode Cloudflare-obfuscated email spans ──────────────────
-    // Cloudflare wraps email addresses in two layers:
-    //   <a href="/cdn-cgi/l/email-protection#HEX1">
-    //     <span class="__cf_email__" data-cfemail="HEX2">[email protected]</span>
-    //   </a>
-    //
-    // The real email is XOR-encoded in the data-cfemail attribute of the <span>.
-    // We decode all such spans first, replacing them with plain email text.
-    // This fires before the <a> handler so the parent <a> then just wraps
-    // a plain text node and gets handled normally (or stripped as /cdn-cgi/).
+    // Decode Cloudflare-obfuscated email spans BEFORE processing links
     $clone.find('span.__cf_email__, span[data-cfemail]').each((_, el) => {
       const cfEmail = $(el).attr('data-cfemail') || '';
-      if (cfEmail) {
-        const realEmail = decodeCloudflareEmail(cfEmail);
-        $(el).replaceWith(realEmail);
-      }
+      if (cfEmail) $(el).replaceWith(decodeCloudflareEmail(cfEmail));
     });
 
-    // Mark bold text with ** so the parser can identify section labels.
-    // IMPORTANT: wrap with spaces before and after so that when Cheerio
-    // extracts plain text, adjacent inline content (like a following <a> link)
-    // doesn't merge directly into the bold text.
-    // e.g. <strong>Visit</strong><a href="...">link</a><strong>and click</strong>
-    //   without spaces → "Visitlink: https://...and click"  (words fused)
-    //   with spaces    → "Visit link: https://... and click" (correct)
+    // Wrap bold text with spaces on each side so adjacent text doesn't fuse
     $clone.find('strong, b').each((_, el) => {
       const text = $(el).text().trim();
       if (text) $(el).replaceWith(` **${text}** `);
     });
 
-    // Convert all <a> links to plain text, preserving useful information.
-    //
-    // Three cases:
-    //  A. Cloudflare-obfuscated email (/cdn-cgi/l/email-protection + data-cfemail)
-    //     → decode the XOR-encoded attribute to get the real email address
-    //  B. mailto: links
-    //     → strip "mailto:" and show the raw address
-    //  C. Elelanajobs/t.me watermark links
-    //     → strip entirely
-    //  D. Vague CTA links ("CLICK HERE TO APPLY", "Apply here" etc.)
-    //     → "TEXT: URL"  so the link is never lost
-    //  E. Plain URL links where text = URL
-    //     → just the URL
-    //
+    // Convert all links to useful plain text
     $clone.find('a').each((_, el) => {
       const href     = $(el).attr('href') || '';
       const cfEmail  = $(el).attr('data-cfemail') || '';
       const linkText = $(el).text().trim();
 
-      // Case A: Cloudflare email protection
+      // Cloudflare email on the <a> itself
       if (cfEmail) {
-        const realEmail = decodeCloudflareEmail(cfEmail);
-        $(el).replaceWith(realEmail);
+        $(el).replaceWith(decodeCloudflareEmail(cfEmail));
         return;
       }
 
-      // Internal anchors — keep visible text only
       if (!href || href.startsWith('#')) {
         $(el).replaceWith(linkText);
         return;
       }
 
-      // Case C: elelanajobs / t.me watermark — remove
       if (href.includes('elelanajobs.com') || href.includes('t.me/elelanajobs')) {
         $(el).replaceWith('');
         return;
       }
 
-      // Cloudflare protection path — the inner <span> has already been decoded
-      // above, so linkText now holds the real email address. Just unwrap the <a>.
       if (href.includes('/cdn-cgi/l/email-protection')) {
         $(el).replaceWith(linkText || '');
         return;
       }
 
-      // Case B: mailto: link — show the raw email address
       if (href.startsWith('mailto:')) {
-        const email = href.replace('mailto:', '').trim();
-        $(el).replaceWith(email || linkText);
+        $(el).replaceWith(href.replace('mailto:', '').trim() || linkText);
         return;
       }
 
-      // Cases D & E: regular HTTP links.
-      //
-      // If the link text is meaningful (a real description, not a placeholder),
-      // show "Description: URL" so neither is lost.
-      // If the text is a generic filler word ("LINK", "here", "click", "this",
-      // "Apply", etc.) just show the URL — the generic word adds no value.
-      //
-      const textIsAlreadyUrl  = linkText.startsWith('http');
+      // Generic filler words — just show the URL
+      const textIsUrl         = linkText.startsWith('http');
       const textIsGenericWord = /^(link|here|click here|click|apply|apply here|this|form|application|this link|download|view|open)$/i.test(linkText.trim());
 
-      if (textIsAlreadyUrl || !linkText || textIsGenericWord) {
-        // Case E: show just the URL
+      if (textIsUrl || !linkText || textIsGenericWord) {
         $(el).replaceWith(href);
       } else {
-        // Case D: meaningful CTA — show "TEXT: URL"
         $(el).replaceWith(`${linkText}: ${href}`);
       }
     });

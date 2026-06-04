@@ -15,6 +15,7 @@ export default function ScraperPanel({
   selectedScraperId,
   setSelectedScraperId,
   scraperItems,
+  scraperMeta,       // { newCount, totalFound, lastSeenId, highestId } from last crawl
   isScrapingChannel,
   processingUrls,
   jobs,
@@ -29,6 +30,9 @@ export default function ScraperPanel({
     ).length;
     return total + genuinelyNew;
   }, 0);
+
+  // Whether the last crawl came back with zero new messages (checkpoint up to date)
+  const crawledButNothingNew = scraperMeta && scraperMeta.newCount === 0 && !isScrapingChannel;
 
   return (
     <div className="bg-white border border-slate-150 rounded-2xl p-6 shadow-xs">
@@ -64,13 +68,13 @@ export default function ScraperPanel({
             </a>
           </div>
 
-          {/* Info line: how many messages the channel page showed */}
-          {scraperItems.length > 0 && !isScrapingChannel && (
+          {/* Info line */}
+          {scraperMeta && !isScrapingChannel && (
             <p className="text-[10px] text-slate-400 mt-1">
-              {scraperItems.length} post(s) found on the channel preview page
-              {newCount > 0
-                ? ` — ${newCount} new to ingest`
-                : ' — all already saved'}
+              {scraperMeta.totalFound} post(s) on page
+              {scraperMeta.newCount > 0
+                ? ` — ${scraperMeta.newCount} new since last crawl`
+                : ' — all already seen (checkpoint up to date)'}
             </p>
           )}
         </div>
@@ -117,8 +121,10 @@ export default function ScraperPanel({
         </div>
       </div>
 
-      {/* Results list or empty state */}
-      {scraperItems.length === 0 ? (
+      {/* Results list, "nothing new" notice, or empty state */}
+      {crawledButNothingNew ? (
+        <NothingNewState totalFound={scraperMeta.totalFound} onCrawl={onCrawl} />
+      ) : scraperItems.length === 0 ? (
         <EmptyScraperState isLoading={isScrapingChannel} />
       ) : (
         <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
@@ -141,6 +147,25 @@ export default function ScraperPanel({
 // ---------------------------------------------------------------------------
 // Empty / loading state
 // ---------------------------------------------------------------------------
+
+function NothingNewState({ totalFound, onCrawl }) {
+  return (
+    <div className="text-center py-10 border border-dashed border-emerald-200 rounded-xl bg-emerald-50/30">
+      <div className="text-2xl mb-2">✓</div>
+      <p className="text-sm font-semibold text-emerald-700">All caught up</p>
+      <p className="text-xs text-slate-400 max-w-xs mx-auto mt-1">
+        No new posts since the last crawl.
+        {totalFound > 0 && ` (${totalFound} post(s) on the channel page, all already ingested.)`}
+      </p>
+      <button
+        onClick={onCrawl}
+        className="mt-4 px-4 py-1.5 text-xs font-semibold bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition"
+      >
+        Check again
+      </button>
+    </div>
+  );
+}
 
 function EmptyScraperState({ isLoading }) {
   if (isLoading) {

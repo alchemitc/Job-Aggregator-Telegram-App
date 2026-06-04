@@ -1,7 +1,101 @@
 // src/components/shared/SettingsPanel.jsx
 // The collapsible settings drawer shown when the user clicks "Configure & Settings".
 
-import { Settings } from 'lucide-react';
+import { useState, useEffect } from 'react';
+
+import { Settings, RefreshCw } from 'lucide-react';
+
+// ---------------------------------------------------------------------------
+// Auto-crawl toggle — reads and writes scheduler status via the API
+// ---------------------------------------------------------------------------
+
+function AutoCrawlToggle() {
+  const [status,       setStatus]       = useState(null);
+  const [isTogglingOn, setIsTogglingOn] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/scheduler/status')
+      .then((r) => r.json())
+      .then(setStatus)
+      .catch(() => {});
+  }, []);
+
+  async function toggleAutoCrawl() {
+    if (!status) return;
+    setIsTogglingOn(true);
+
+    // The scheduler runs server-side. We can't toggle it at runtime without
+    // a page reload — so we update the .env hint via a note, and provide a
+    // manual "Crawl Now" as the immediate action instead.
+    // For now, "Crawl Now" is the real-time control.
+    try {
+      await fetch('/api/scheduler/run-now', { method: 'POST' });
+      const updated = await fetch('/api/scheduler/status').then((r) => r.json());
+      setStatus(updated);
+    } catch {
+      // Ignore
+    } finally {
+      setIsTogglingOn(false);
+    }
+  }
+
+  function timeUntil(iso) {
+    if (!iso) return null;
+    const diff = new Date(iso) - Date.now();
+    if (diff <= 0) return 'any moment';
+    const h = Math.floor(diff / 3_600_000);
+    const m = Math.floor((diff % 3_600_000) / 60_000);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  }
+
+  if (!status) return null;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div>
+          <span className="text-xs font-bold text-slate-300 block">AUTO-CRAWL</span>
+          <span className="text-[10px] text-slate-400">
+            {status.enabled
+              ? `Runs every ${status.intervalHours}h — next in ${timeUntil(status.nextRunAt) || '…'}`
+              : 'Disabled — set AUTO_CRAWL=true in .env to enable'}
+          </span>
+        </div>
+
+        {/* Status indicator */}
+        <div className="flex items-center gap-2">
+          <span className={`h-2 w-2 rounded-full ${status.enabled ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+          <span className="text-[10px] text-slate-400 font-mono">
+            {status.isRunning ? 'Running…' : status.enabled ? 'Active' : 'Off'}
+          </span>
+        </div>
+      </div>
+
+      {/* Last run info */}
+      {status.lastRunAt && (
+        <p className="text-[10px] text-slate-500">
+          Last run: {new Date(status.lastRunAt).toLocaleString()} — {status.lastRunCount} new job(s)
+        </p>
+      )}
+
+      {/* Manual crawl now button */}
+      <button
+        onClick={toggleAutoCrawl}
+        disabled={isTogglingOn || status.isRunning}
+        className="px-3 py-1.5 text-[11px] font-bold bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white rounded-lg transition inline-flex items-center gap-1.5 disabled:opacity-40"
+      >
+        <RefreshCw className={`h-3 w-3 ${status.isRunning || isTogglingOn ? 'animate-spin' : ''}`} />
+        {status.isRunning ? 'Crawling…' : 'Crawl Now'}
+      </button>
+
+      {!status.enabled && (
+        <p className="text-[10px] text-amber-400">
+          To enable auto-crawl: add <code className="bg-slate-800 px-1 rounded">AUTO_CRAWL=true</code> to your .env and restart.
+        </p>
+      )}
+    </div>
+  );
+}
 
 export default function SettingsPanel({
   tempDomain,         setTempDomain,
@@ -95,6 +189,11 @@ export default function SettingsPanel({
               className="w-full text-xs font-semibold px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-indigo-500"
             />
           </div>
+        </div>
+
+        {/* Auto-crawl toggle */}
+        <div className="mt-4 pt-4 border-t border-slate-800">
+          <AutoCrawlToggle />
         </div>
 
         {/* AI provider info banner */}

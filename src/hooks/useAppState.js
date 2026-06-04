@@ -30,6 +30,7 @@ export function useAppState() {
   const [scrapers,          setScrapers]          = useState([]);
   const [selectedScraperId, setSelectedScraperId] = useState('elelanajobs');
   const [scraperItems,      setScraperItems]      = useState([]);
+  const [scraperMeta,       setScraperMeta]       = useState(null); // checkpoint info from last crawl
   const [isScrapingChannel, setIsScrapingChannel] = useState(false);
   const [processingUrls,    setProcessingUrls]    = useState({});
 
@@ -185,8 +186,29 @@ export function useAppState() {
 
       if (res.ok) {
         const data = await res.json();
+
+        // Store the full crawl metadata so the UI can show checkpoint info
+        setScraperMeta({
+          newCount:   data.newCount,
+          totalFound: data.totalFound,
+          lastSeenId: data.lastSeenId,
+          highestId:  data.highestId,
+          scraperId:  selectedScraperId,
+        });
+
         setScraperItems(data.items || []);
-        addLog(`Found ${data.count} post(s) in ${active?.name || 'channel'}.`);
+
+        if (data.newCount === 0) {
+          addLog(
+            `No new posts since last crawl. ` +
+            `(${data.totalFound} post(s) on page, all already seen.)`
+          );
+        } else {
+          addLog(
+            `Found ${data.newCount} new post(s) in ${active?.name || 'channel'} ` +
+            `(${data.totalFound} total on page).`
+          );
+        }
       } else {
         const err = await res.json();
         addLog(`Crawl failed: ${err.error}`);
@@ -234,8 +256,6 @@ export function useAppState() {
   }
 
   async function ingestAllDiscovered() {
-    // Safety check: if the crawl is still running, warn and bail out.
-    // scraperItems would be stale from a previous crawl if we proceed now.
     if (isScrapingChannel) {
       addLog('⚠ Crawl is still running — wait for it to finish before ingesting.');
       return;
@@ -246,34 +266,43 @@ export function useAppState() {
       return;
     }
 
-    addLog(`Starting batch ingest of ${scraperItems.length} discovered listing(s)…`);
+    addLog(`Starting batch ingest of ${scraperItems.length} new listing(s)…`);
     let countNew     = 0;
     let countSkipped = 0;
 
     for (const item of scraperItems) {
       for (const url of item.detailUrls) {
-        // Only skip if a non-deleted (active) job already exists for this URL.
-        // If the matching job is in the Recycle Bin, treat it as a new ingest
-        // so the user gets a fresh copy (server will update the existing record).
         const activeMatch = jobs.find((j) => j.sourceUrl === url && !j.isDeleted);
-
         if (activeMatch || processingUrls[url]) {
           countSkipped++;
           continue;
         }
-
         const result = await ingestSingleJob(url, item.text, { silent: true });
         if (result) countNew++;
       }
     }
 
-    // One silent reload at the end to sync with server state
-    await fetchJobs({ showSpinner: false });
-    addLog(`Batch ingest complete — ${countNew} new, ${countSkipped} already exist.`);
+    // Advance the checkpoint to the highest message ID we just processed
+    if (scraperMeta?.highestId && scraperMeta?.scraperId) {
+      try {
+        await fetch('/api/scrape/checkpoint', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            scraperId: scraperMeta.scraperId,
+            messageId: scraperMeta.highestId,
+          }),
+        });
+        addLog(`Checkpoint saved — next crawl will start from message #${scraperMeta.highestId}.`);
+      } catch {
+        // Non-critical — worst case the next crawl re-shows already-seen posts
+      }
+    }
 
-    // Clear the crawl results panel so pressing "Ingest All New" again
-    // doesn't re-process the same items. The user must crawl again to get fresh results.
+    await fetchJobs({ showSpinner: false });
+    addLog(`Batch ingest complete — ${countNew} ingested, ${countSkipped} skipped.`);
     setScraperItems([]);
+    setScraperMeta(null);
   }
 
   // ---------------------------------------------------------------------------
@@ -429,7 +458,7 @@ export function useAppState() {
     selectedJobIds, setSelectedJobIds,
     isPostingTelegram, postingResults,
     scrapers, selectedScraperId, setSelectedScraperId,
-    scraperItems, isScrapingChannel, processingUrls,
+    scraperItems, scraperMeta, isScrapingChannel, processingUrls,
     statusLogs,
     telegramModalJob, setTelegramModalJob,
     previewMode, setPreviewMode,

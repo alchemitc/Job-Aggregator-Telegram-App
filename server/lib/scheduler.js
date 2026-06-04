@@ -13,7 +13,7 @@
 // Disable by setting AUTO_CRAWL=false or removing it.
 
 import * as cheerio from 'cheerio';
-import { loadJobs, loadConfig, saveJobs } from './db.js';
+import { loadJobs, loadConfig, saveJobs, saveConfig } from './db.js';
 import { buildJobRecord } from './job-builder.js';
 import { getScraperById } from '../scrapers/index.js';
 
@@ -57,11 +57,35 @@ async function runCrawlCycle() {
     });
     if (!response.ok) throw new Error(`HTTP ${response.status} from ${scraper.channelUrl}`);
 
-    const html  = await response.text();
-    const $     = cheerio.load(html);
-    const items = scraper.parseTelegramHtml($);
+    const html     = await response.text();
+    const $        = cheerio.load(html);
+    const allItems = scraper.parseTelegramHtml($);
 
-    console.log(`[scheduler] Channel returned ${items.length} post(s).`);
+    // Apply the checkpoint — only process messages newer than last seen
+    const config     = loadConfig();
+    const lastSeenId = config.lastSeenMessageId?.['elelanajobs'] || 0;
+    const items      = allItems.filter((item) => (item.messageId || 0) > lastSeenId);
+    const highestId  = allItems.reduce((max, item) => Math.max(max, item.messageId || 0), 0);
+
+    console.log(
+      `[scheduler] ${allItems.length} total post(s), ${items.length} new ` +
+      `(checkpoint: #${lastSeenId}, highest: #${highestId})`
+    );
+
+    if (items.length === 0) {
+      // Advance checkpoint to highest seen even if nothing new to ingest
+      if (highestId > lastSeenId) {
+        const cfg = loadConfig();
+        if (!cfg.lastSeenMessageId) cfg.lastSeenMessageId = {};
+        cfg.lastSeenMessageId['elelanajobs'] = highestId;
+        saveConfig(cfg);
+      }
+      state.isRunning    = false;
+      state.lastRunAt    = new Date().toISOString();
+      state.lastRunCount = 0;
+      console.log('[scheduler] No new posts — checkpoint up to date.');
+      return;
+    }
 
     // Step 2: ingest each URL that doesn't already exist as an active job
     const config = loadConfig();
@@ -98,6 +122,14 @@ async function runCrawlCycle() {
   } catch (err) {
     console.error('[scheduler] Crawl cycle error:', err.message);
   } finally {
+    // Save the checkpoint so next run skips these messages
+    if (highestId > lastSeenId) {
+      const cfg = loadConfig();
+      if (!cfg.lastSeenMessageId) cfg.lastSeenMessageId = {};
+      cfg.lastSeenMessageId['elelanajobs'] = highestId;
+      saveConfig(cfg);
+    }
+
     state.isRunning    = false;
     state.lastRunAt    = new Date().toISOString();
     state.lastRunCount = newJobCount;

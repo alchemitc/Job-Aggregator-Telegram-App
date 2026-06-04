@@ -1,22 +1,16 @@
 // server/routes/scraper.js
-// Endpoints that drive the two-step scraping workflow:
+// Endpoints that drive the two-step scraping workflow.
 //
-//  Step 1 — GET /api/scrapers
-//    Returns the list of registered scraper targets (name, id, channelUrl).
-//    The frontend uses this to populate the source dropdown.
-//
-//  Step 2a — POST /api/scrape/channel
-//    Fetches the public Telegram channel preview page and returns a list of
-//    job post previews (text snippet + detail URLs).
-//
-//  Step 2b — POST /api/scrape/detail
-//    Takes a single detail-page URL, fetches and parses it, runs the AI
-//    extraction, and saves the result as a job record.
+// Checkpoint system:
+//   Every Telegram message has a numeric message ID (from data-post attribute).
+//   After each crawl we save the highest seen ID to config.json as
+//   lastSeenMessageId[scraperId]. On the next crawl we only return messages
+//   newer than that ID, so repeated crawls never show already-processed posts.
 
 import express from 'express';
 import * as cheerio from 'cheerio';
 import { getScraperById, getScraperForUrl, SCRAPERS } from '../scrapers/index.js';
-import { loadConfig, loadJobs, saveJobs } from '../lib/db.js';
+import { loadConfig, saveConfig, loadJobs, saveJobs } from '../lib/db.js';
 import { buildJobRecord } from '../lib/job-builder.js';
 
 const router = express.Router();
@@ -29,17 +23,26 @@ const BROWSER_USER_AGENT =
 // GET /api/scrapers
 // ---------------------------------------------------------------------------
 router.get('/', (req, res) => {
+  const config = loadConfig();
   const scraperList = SCRAPERS.map((s) => ({
-    id: s.id,
-    name: s.name,
-    channelUrl: s.channelUrl,
+    id:                s.id,
+    name:              s.name,
+    channelUrl:        s.channelUrl,
+    lastSeenMessageId: config.lastSeenMessageId?.[s.id] || 0,
   }));
   res.json(scraperList);
 });
 
 // ---------------------------------------------------------------------------
 // POST /api/scrape/channel
-// Crawl the Telegram public channel preview and return message previews.
+// Crawl the Telegram channel preview and return only NEW messages.
+//
+// Response includes:
+//   items        — new messages only (newer than checkpoint)
+//   newCount     — number of new messages found
+//   totalFound   — total messages on the page (including already-seen)
+//   lastSeenId   — the checkpoint that was used
+//   highestId    — the highest message ID found (use to see how far ahead we are)
 // ---------------------------------------------------------------------------
 router.post('/channel', async (req, res) => {
   const { scraperId = 'elelanajobs' } = req.body;
@@ -57,15 +60,34 @@ router.post('/channel', async (req, res) => {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status} returned from ${scraper.channelUrl}`);
+      throw new Error(`HTTP ${response.status} from ${scraper.channelUrl}`);
     }
 
-    const html = await response.text();
-    const $ = cheerio.load(html);
-    const items = scraper.parseTelegramHtml($);
+    const html  = await response.text();
+    const $     = cheerio.load(html);
+    const allItems = scraper.parseTelegramHtml($);
 
-    console.log(`[scraper] Found ${items.length} message(s) in ${scraper.name}`);
-    res.json({ success: true, count: items.length, items });
+    // Load the checkpoint — the highest message ID we have already processed
+    const config      = loadConfig();
+    const lastSeenId  = config.lastSeenMessageId?.[scraperId] || 0;
+    const highestId   = allItems.reduce((max, item) => Math.max(max, item.messageId || 0), 0);
+
+    // Filter to only messages newer than the checkpoint
+    const newItems = allItems.filter((item) => (item.messageId || 0) > lastSeenId);
+
+    console.log(
+      `[scraper] ${scraper.name}: ${allItems.length} total, ` +
+      `${newItems.length} new (checkpoint: #${lastSeenId}, highest: #${highestId})`
+    );
+
+    res.json({
+      success:     true,
+      items:       newItems,
+      newCount:    newItems.length,
+      totalFound:  allItems.length,
+      lastSeenId,
+      highestId,
+    });
   } catch (err) {
     console.error('[scraper] Channel crawl failed:', err.message);
     res.status(500).json({ error: err.message });
@@ -73,35 +95,55 @@ router.post('/channel', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/scrape/checkpoint
+// Save the checkpoint after the user has finished ingesting.
+// Called by the frontend after "Ingest All New" completes successfully.
+// ---------------------------------------------------------------------------
+router.post('/checkpoint', (req, res) => {
+  const { scraperId, messageId } = req.body;
+
+  if (!scraperId || !messageId) {
+    return res.status(400).json({ error: 'scraperId and messageId are required.' });
+  }
+
+  const config = loadConfig();
+  if (!config.lastSeenMessageId) config.lastSeenMessageId = {};
+
+  // Only advance the checkpoint — never go backwards
+  const current = config.lastSeenMessageId[scraperId] || 0;
+  if (messageId > current) {
+    config.lastSeenMessageId[scraperId] = messageId;
+    saveConfig(config);
+    console.log(`[scraper] Checkpoint updated for ${scraperId}: #${messageId}`);
+  }
+
+  res.json({ success: true, checkpoint: config.lastSeenMessageId[scraperId] });
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/scrape/detail
-// Fetch a single job detail page, extract structured data, and save it.
 // ---------------------------------------------------------------------------
 router.post('/detail', async (req, res) => {
   const { url, fallbackText } = req.body;
 
   if (!url || typeof url !== 'string') {
-    return res.status(400).json({ error: 'A valid "url" field is required in the request body.' });
+    return res.status(400).json({ error: 'A valid "url" field is required.' });
   }
 
-  // Find which scraper handles this domain (default to elelanajobs)
-  const scraper = getScraperForUrl(url) || getScraperById('elelanajobs');
-  const config = loadConfig();
-  const jobs = loadJobs();
-
-  // Check if this URL has already been ingested
+  const scraper       = getScraperForUrl(url) || getScraperById('elelanajobs');
+  const config        = loadConfig();
+  const jobs          = loadJobs();
   const existingIndex = jobs.findIndex((j) => j.sourceUrl === url);
 
   try {
     const newJobRecord = await buildJobRecord(url, fallbackText, scraper, config);
 
     if (existingIndex > -1) {
-      // Update the existing record in place
       jobs[existingIndex] = { ...jobs[existingIndex], ...newJobRecord };
-      console.log(`[scraper] Updated existing job: ${newJobRecord.companyName}`);
+      console.log(`[scraper] Updated: ${newJobRecord.companyName}`);
     } else {
-      // Add as a new record
       jobs.push(newJobRecord);
-      console.log(`[scraper] Saved new job: ${newJobRecord.companyName}`);
+      console.log(`[scraper] Saved: ${newJobRecord.companyName}`);
     }
 
     saveJobs(jobs);

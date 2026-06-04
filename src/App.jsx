@@ -110,6 +110,7 @@ function Dashboard({ state }) {
               selectedScraperId={state.selectedScraperId}
               setSelectedScraperId={state.setSelectedScraperId}
               scraperItems={state.scraperItems}
+              scraperMeta={state.scraperMeta}
               isScrapingChannel={state.isScrapingChannel}
               processingUrls={state.processingUrls}
               jobs={state.jobs}
