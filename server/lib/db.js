@@ -49,22 +49,42 @@ function ensureDataFilesExist() {
   }
 
   if (!fs.existsSync(CONFIG_FILE)) {
-    // First run — write config with the domain from the environment
-    const defaultConfig = { domain: getDefaultDomain() };
+    // First run — seed all env values into config
+    const defaultConfig = {
+      domain:           getDefaultDomain(),
+      telegramBotToken: process.env.TELEGRAM_BOT_TOKEN  || '',
+      telegramChatId:   process.env.TELEGRAM_CHANNEL_ID || '',
+    };
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(defaultConfig, null, 2));
-    console.log(`[db] Created config.json with domain: ${defaultConfig.domain}`);
-  } else if (process.env.APP_DOMAIN) {
-    // Config file already exists — if APP_DOMAIN is set, keep the env var in sync.
-    // This lets you change the domain by updating .env without touching config.json.
+    console.log(`[db] Created config.json — domain: ${defaultConfig.domain}`);
+  } else {
+    // Config exists — sync any env values that have changed
     try {
       const existing = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
-      if (existing.domain !== process.env.APP_DOMAIN) {
+      let changed = false;
+
+      if (process.env.APP_DOMAIN && existing.domain !== process.env.APP_DOMAIN) {
         existing.domain = process.env.APP_DOMAIN;
+        changed = true;
+        console.log(`[db] Domain synced from APP_DOMAIN: ${process.env.APP_DOMAIN}`);
+      }
+      // Only overwrite credentials from env if env actually has a value
+      // (prevents blanking out credentials the user set via the Settings UI)
+      if (process.env.TELEGRAM_BOT_TOKEN && existing.telegramBotToken !== process.env.TELEGRAM_BOT_TOKEN) {
+        existing.telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+        changed = true;
+        console.log('[db] Telegram bot token synced from TELEGRAM_BOT_TOKEN env.');
+      }
+      if (process.env.TELEGRAM_CHANNEL_ID && existing.telegramChatId !== process.env.TELEGRAM_CHANNEL_ID) {
+        existing.telegramChatId = process.env.TELEGRAM_CHANNEL_ID;
+        changed = true;
+        console.log('[db] Telegram channel ID synced from TELEGRAM_CHANNEL_ID env.');
+      }
+
+      if (changed) {
         fs.writeFileSync(CONFIG_FILE, JSON.stringify(existing, null, 2));
-        console.log(`[db] Domain updated from APP_DOMAIN env: ${process.env.APP_DOMAIN}`);
       }
     } catch {
-      // If the file is corrupt, recreate it
       fs.writeFileSync(CONFIG_FILE, JSON.stringify({ domain: getDefaultDomain() }, null, 2));
     }
   }
