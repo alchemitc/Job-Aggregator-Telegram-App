@@ -538,6 +538,20 @@ function parseDetailPage(plainText, fallbackCompanyName) {
   if (!deadline && deadlineRel) deadline = deadlineRel;
   if (!companyName) companyName = cleanCompanyName(fallbackCompanyName) || 'Unknown Company';
 
+  // Derive top-level location from positions if not already set.
+  // If all positions share the same location, use it as the top-level.
+  // If they differ, join them so the reader sees all cities.
+  // If no position has a location either, leave it empty — never default to Addis Ababa.
+  if (!location && positions.length > 0) {
+    const posLocations = [...new Set(positions.map((p) => p.location).filter(Boolean))];
+    if (posLocations.length === 1) {
+      location = posLocations[0];
+    } else if (posLocations.length > 1) {
+      location = posLocations.join(', ');
+    }
+    // If still empty after checking positions, leave it as '' — not 'Addis Ababa'
+  }
+
   howToApply = howToApply
     .split('\n')
     .filter((l) => {
@@ -551,7 +565,7 @@ function parseDetailPage(plainText, fallbackCompanyName) {
     companyName,
     aboutCompany: aboutCompany.trim(),
     positions,
-    location:   location   || 'Addis Ababa',
+    location:   location   || '',  // empty string = unknown, never default to a city name
     deadline:   deadline   || 'Not specified',
     howToApply: howToApply || '',
   };

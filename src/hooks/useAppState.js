@@ -408,7 +408,7 @@ export function useAppState() {
     return (
       job.companyName.toLowerCase().includes(query) ||
       job.jobPositions.some((pos) => pos.toLowerCase().includes(query)) ||
-      job.location.toLowerCase().includes(query)
+      (job.location || '').toLowerCase().includes(query)
     );
   });
 

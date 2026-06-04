@@ -317,12 +317,16 @@ function JobRow({
         </ul>
       </td>
 
-      {/* Location only — education removed from table to prevent column overflow */}
+      {/* Location */}
       <td className="py-3 px-3 w-[130px]">
-        <div className="flex items-center gap-1 text-xs text-slate-600 font-medium">
-          <MapPin className="h-3 w-3 text-indigo-400 shrink-0" />
-          <span className="truncate max-w-[110px]" title={job.location}>{job.location}</span>
-        </div>
+        {job.location ? (
+          <div className="flex items-center gap-1 text-xs text-slate-600 font-medium">
+            <MapPin className="h-3 w-3 text-indigo-400 shrink-0" />
+            <span className="truncate max-w-[110px]" title={job.location}>{job.location}</span>
+          </div>
+        ) : (
+          <span className="text-xs text-slate-300">—</span>
+        )}
       </td>
 
       {/* Deadline */}

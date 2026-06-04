@@ -379,20 +379,22 @@ function WebViewPreview({ job, domainConfig }) {
           </ul>
         </div>
 
-        <div className="flex gap-4 text-xs py-3 border-t border-b border-gray-100 mb-4">
-          {isFieldValid(job.location) && (
-            <div>
-              <span className="text-[9px] uppercase font-bold text-gray-400 block">Location</span>
-              <span className="text-gray-700">{job.location}</span>
-            </div>
-          )}
-          {isFieldValid(job.deadline) && (
-            <div>
-              <span className="text-[9px] uppercase font-bold text-gray-400 block">Deadline</span>
-              <span className="text-gray-700 font-semibold">{job.deadline}</span>
-            </div>
-          )}
-        </div>
+        {(job.location || (job.deadline && job.deadline !== 'Not specified')) && (
+          <div className="flex gap-4 text-xs py-3 border-t border-b border-gray-100 mb-4">
+            {job.location && (
+              <div>
+                <span className="text-[9px] uppercase font-bold text-gray-400 block">Location</span>
+                <span className="text-gray-700">{job.location}</span>
+              </div>
+            )}
+            {job.deadline && job.deadline !== 'Not specified' && (
+              <div>
+                <span className="text-[9px] uppercase font-bold text-gray-400 block">Deadline</span>
+                <span className="text-gray-700 font-semibold">{job.deadline}</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {positions ? (
           <div className="space-y-4">

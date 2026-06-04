@@ -64,9 +64,9 @@ export default function PublicJobPage({ routeParams, domainConfig, onNavigate })
           <p className="text-xs text-gray-400 mb-1">Posted: {job.sourceDate}</p>
           <h1 className="text-2xl font-bold text-gray-900 mb-1">{job.companyName}</h1>
           <div className="flex flex-wrap gap-3 mt-2 text-xs text-gray-500">
-            {job.location && job.location !== 'Addis Ababa' || true ? (
+            {job.location && (
               <span>📍 {job.location}</span>
-            ) : null}
+            )}
             {job.deadline && job.deadline !== 'Not specified' && (
               <span className="text-rose-600 font-semibold">📅 Deadline: {job.deadline}</span>
             )}
