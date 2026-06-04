@@ -361,6 +361,18 @@ function parseDetailPage(plainText, fallbackCompanyName) {
     const sectionType = line.includes('**') ? getSectionType(line) : null;
     if (sectionType) {
       currentSection = sectionType;
+
+      // Some pages put content on the SAME LINE as the section header label,
+      // e.g. "**Application Link**: https://rammisbank.et/jobs"
+      // Strip the bold label and colon, then store whatever is left.
+      if (sectionType === 'apply') {
+        const afterLabel = stripped
+          .replace(/^[\w\s&]+[:\-–]\s*/i, '')  // strip "Application Link: "
+          .trim();
+        if (afterLabel && afterLabel.length > 1) {
+          howToApply += (howToApply ? '\n' : '') + afterLabel;
+        }
+      }
       continue;
     }
 
