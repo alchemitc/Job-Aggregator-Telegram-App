@@ -209,6 +209,24 @@ export const elelanajobsScraper = {
         $(el).prepend('\n').append('\n');
       });
 
+    // ── Step 5a: Decode Cloudflare-obfuscated email spans ──────────────────
+    // Cloudflare wraps email addresses in two layers:
+    //   <a href="/cdn-cgi/l/email-protection#HEX1">
+    //     <span class="__cf_email__" data-cfemail="HEX2">[email protected]</span>
+    //   </a>
+    //
+    // The real email is XOR-encoded in the data-cfemail attribute of the <span>.
+    // We decode all such spans first, replacing them with plain email text.
+    // This fires before the <a> handler so the parent <a> then just wraps
+    // a plain text node and gets handled normally (or stripped as /cdn-cgi/).
+    $clone.find('span.__cf_email__, span[data-cfemail]').each((_, el) => {
+      const cfEmail = $(el).attr('data-cfemail') || '';
+      if (cfEmail) {
+        const realEmail = decodeCloudflareEmail(cfEmail);
+        $(el).replaceWith(realEmail);
+      }
+    });
+
     // Mark bold text with ** so the parser can identify section labels
     $clone.find('strong, b').each((_, el) => {
       const text = $(el).text().trim();
@@ -253,8 +271,8 @@ export const elelanajobsScraper = {
         return;
       }
 
-      // Cloudflare protection path without data-cfemail attribute
-      // (fall back to showing the link text, which is "[email protected]")
+      // Cloudflare protection path — the inner <span> has already been decoded
+      // above, so linkText now holds the real email address. Just unwrap the <a>.
       if (href.includes('/cdn-cgi/l/email-protection')) {
         $(el).replaceWith(linkText || '');
         return;
