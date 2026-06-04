@@ -234,22 +234,42 @@ export function useAppState() {
   }
 
   async function ingestAllDiscovered() {
-    addLog('Starting batch ingest of all new listings…');
-    let count = 0;
+    // Safety check: if the crawl is still running, warn and bail out.
+    // scraperItems would be stale from a previous crawl if we proceed now.
+    if (isScrapingChannel) {
+      addLog('⚠ Crawl is still running — wait for it to finish before ingesting.');
+      return;
+    }
+
+    if (scraperItems.length === 0) {
+      addLog('Nothing to ingest — run "Crawl Previews" first.');
+      return;
+    }
+
+    addLog(`Starting batch ingest of ${scraperItems.length} discovered listing(s)…`);
+    let countNew     = 0;
+    let countSkipped = 0;
 
     for (const item of scraperItems) {
       for (const url of item.detailUrls) {
-        const alreadySaved = jobs.some((j) => j.sourceUrl === url);
-        if (!alreadySaved && !processingUrls[url]) {
-          const result = await ingestSingleJob(url, item.text, { silent: true });
-          if (result) count++;
+        // Only skip if a non-deleted (active) job already exists for this URL.
+        // If the matching job is in the Recycle Bin, treat it as a new ingest
+        // so the user gets a fresh copy (server will update the existing record).
+        const activeMatch = jobs.find((j) => j.sourceUrl === url && !j.isDeleted);
+
+        if (activeMatch || processingUrls[url]) {
+          countSkipped++;
+          continue;
         }
+
+        const result = await ingestSingleJob(url, item.text, { silent: true });
+        if (result) countNew++;
       }
     }
 
-    // One single silent reload at the end to sync with server state
+    // One silent reload at the end to sync with server state
     await fetchJobs({ showSpinner: false });
-    addLog(`Batch ingest complete — ${count} new job(s) added.`);
+    addLog(`Batch ingest complete — ${countNew} new, ${countSkipped} already exist.`);
   }
 
   // ---------------------------------------------------------------------------
