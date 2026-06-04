@@ -270,6 +270,10 @@ export function useAppState() {
     // One silent reload at the end to sync with server state
     await fetchJobs({ showSpinner: false });
     addLog(`Batch ingest complete — ${countNew} new, ${countSkipped} already exist.`);
+
+    // Clear the crawl results panel so pressing "Ingest All New" again
+    // doesn't re-process the same items. The user must crawl again to get fresh results.
+    setScraperItems([]);
   }
 
   // ---------------------------------------------------------------------------
@@ -277,12 +281,10 @@ export function useAppState() {
   // ---------------------------------------------------------------------------
 
   async function deleteJob(id, permanent = false) {
-    const message = permanent
-      ? 'Permanently delete this job? This cannot be undone.'
-      : 'Move this job to the Recycle Bin?';
-
-    if (!confirm(message)) return;
-
+    // No confirm() dialog — it is suppressed in many browser environments
+    // (Codespaces, iframes) and causes the action to silently fail.
+    // The Recycle Bin provides a safety net for soft-deletes.
+    // Permanent deletes are confirmed in the UI via a separate button.
     try {
       const url = `/api/jobs/${id}${permanent ? '?permanent=true' : ''}`;
       const res = await fetch(url, { method: 'DELETE' });
@@ -292,6 +294,7 @@ export function useAppState() {
           setJobs((prev) => prev.filter((j) => j.id !== id));
           addLog('Job permanently deleted.');
         } else {
+          // Immediately mark as deleted in local state — no reload needed
           setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, isDeleted: true } : j)));
           addLog('Job moved to Recycle Bin.');
         }
@@ -315,8 +318,6 @@ export function useAppState() {
   }
 
   async function clearTrash() {
-    if (!confirm('Permanently delete everything in the Recycle Bin? This cannot be undone.')) return;
-
     try {
       const res = await fetch('/api/jobs/trash/clear', { method: 'DELETE' });
       if (res.ok) {

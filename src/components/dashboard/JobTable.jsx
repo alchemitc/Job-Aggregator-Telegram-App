@@ -122,23 +122,21 @@ export default function JobTable({
           isPosting={isPostingTelegram}
           onPost={() => onPostTelegram(selectedJobIds)}
           onTrash={async () => {
-            if (!confirm(`Move ${selectedJobIds.length} job(s) to Recycle Bin?`)) return;
+            // Call onDelete for each selected ID — this updates local state immediately
             for (const id of selectedJobIds) {
-              await fetch(`/api/jobs/${id}`, { method: 'DELETE' });
+              await onDelete(id, false);
             }
             setSelectedJobIds([]);
           }}
           onRestore={async () => {
-            if (!confirm(`Restore ${selectedJobIds.length} job(s)?`)) return;
             for (const id of selectedJobIds) {
-              await fetch(`/api/jobs/${id}/restore`, { method: 'POST' });
+              await onRestore(id);
             }
             setSelectedJobIds([]);
           }}
           onDeleteForever={async () => {
-            if (!confirm(`Permanently delete ${selectedJobIds.length} job(s)? This cannot be undone.`)) return;
             for (const id of selectedJobIds) {
-              await fetch(`/api/jobs/${id}?permanent=true`, { method: 'DELETE' });
+              await onDelete(id, true);
             }
             setSelectedJobIds([]);
           }}

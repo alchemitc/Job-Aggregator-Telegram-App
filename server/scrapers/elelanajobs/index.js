@@ -227,10 +227,16 @@ export const elelanajobsScraper = {
       }
     });
 
-    // Mark bold text with ** so the parser can identify section labels
+    // Mark bold text with ** so the parser can identify section labels.
+    // IMPORTANT: wrap with spaces before and after so that when Cheerio
+    // extracts plain text, adjacent inline content (like a following <a> link)
+    // doesn't merge directly into the bold text.
+    // e.g. <strong>Visit</strong><a href="...">link</a><strong>and click</strong>
+    //   without spaces → "Visitlink: https://...and click"  (words fused)
+    //   with spaces    → "Visit link: https://... and click" (correct)
     $clone.find('strong, b').each((_, el) => {
       const text = $(el).text().trim();
-      if (text) $(el).replaceWith(`**${text}**`);
+      if (text) $(el).replaceWith(` **${text}** `);
     });
 
     // Convert all <a> links to plain text, preserving useful information.
