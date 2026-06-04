@@ -21,6 +21,8 @@ export function useAppState() {
   const [activeTab,         setActiveTab]         = useState('all');
   const [searchQuery,       setSearchQuery]       = useState('');
   const [selectedJobIds,    setSelectedJobIds]    = useState([]);
+  // Quick-filter set from clicking stat cards — 'fallback' | 'ai' | null
+  const [quickFilter,       setQuickFilter]       = useState(null);
 
   // ---- Telegram posting ----
   const [isPostingTelegram, setIsPostingTelegram] = useState(false);
@@ -428,7 +430,13 @@ export function useAppState() {
     // Tab filter
     if (activeTab === 'trash')  return  job.isDeleted;
     if (activeTab === 'posted') return !job.isDeleted && job.isPosted;
-    return !job.isDeleted; // 'all' tab
+    return !job.isDeleted;
+
+  }).filter((job) => {
+    // Quick filter from stat card clicks
+    if (quickFilter === 'fallback') return !job.positions?.length && !job.detailContent;
+    if (quickFilter === 'ai')       return job.aiFilled?.length > 0;
+    return true;
 
   }).filter((job) => {
     // Search filter
@@ -456,6 +464,7 @@ export function useAppState() {
     activeTab, setActiveTab,
     searchQuery, setSearchQuery,
     selectedJobIds, setSelectedJobIds,
+    quickFilter, setQuickFilter,
     isPostingTelegram, postingResults,
     scrapers, selectedScraperId, setSelectedScraperId,
     scraperItems, scraperMeta, isScrapingChannel, processingUrls,

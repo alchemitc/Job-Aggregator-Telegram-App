@@ -100,7 +100,18 @@ function Dashboard({ state }) {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 mt-8">
 
-        <StatsRow jobs={state.jobs} domainConfig={state.domainConfig} />
+        <StatsRow
+          jobs={state.jobs}
+          domainConfig={state.domainConfig}
+          onFilterFallback={() => {
+            state.setQuickFilter(state.quickFilter === 'fallback' ? null : 'fallback');
+            state.setActiveTab('all');
+          }}
+          onFilterAI={() => {
+            state.setQuickFilter(state.quickFilter === 'ai' ? null : 'ai');
+            state.setActiveTab('all');
+          }}
+        />
 
         {/* Mid-section: scraper panel + activity log side by side */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-8 items-start">
@@ -145,6 +156,8 @@ function Dashboard({ state }) {
             state.setPreviewMode('webview');
           }}
           onNavigate={state.navigateTo}
+          quickFilter={state.quickFilter}
+          setQuickFilter={state.setQuickFilter}
         />
 
       </main>

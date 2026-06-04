@@ -24,6 +24,8 @@ export default function JobTable({
   onPostTelegram,
   onOpenPreview,
   onNavigate,
+  quickFilter,
+  setQuickFilter,
 }) {
   // Toggle a single job's selected state
   function toggleJobSelection(id, checked) {
@@ -62,12 +64,16 @@ export default function JobTable({
         <div>
           <h2 className="text-md font-bold text-slate-900">Job Board Database</h2>
           <p className="text-xs text-slate-400">
-            Manage, audit, preview, and post job listings.
-            {' '}Jobs with a{' '}
+            Manage, audit, preview, and post job listings. Two badges flag jobs needing review:
+            {' '}
+            <span className="inline-flex items-center gap-0.5 px-1 py-0.5 text-[9px] font-bold rounded bg-orange-50 text-orange-700 border border-orange-200">
+              ⚠ Fallback
+            </span>
+            {' '}= detail page had no content (only Telegram teaser data saved).{' '}
             <span className="inline-flex items-center gap-0.5 px-1 py-0.5 text-[9px] font-bold rounded bg-amber-50 text-amber-700 border border-amber-200">
               ✦ AI filled
             </span>
-            {' '}badge under the company name had missing fields filled by AI — review those manually.
+            {' '}= AI filled one or more missing fields. Click the stat cards above to filter.
           </p>
         </div>
 
@@ -113,6 +119,23 @@ export default function JobTable({
           </button>
         )}
       </div>
+
+      {/* Quick-filter active banner */}
+      {quickFilter && (
+        <div className="flex items-center justify-between bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-2 mb-4 text-xs">
+          <span className="text-indigo-700 font-semibold">
+            {quickFilter === 'fallback'
+              ? '⚠ Showing fallback-only jobs — detail page had no content'
+              : '✦ Showing AI-assisted jobs — fields were filled by AI'}
+          </span>
+          <button
+            onClick={() => setQuickFilter(null)}
+            className="text-indigo-500 hover:text-indigo-700 font-bold ml-4"
+          >
+            ✕ Clear filter
+          </button>
+        </div>
+      )}
 
       {/* Batch actions bar (shown when something is selected) */}
       {selectedJobIds.length > 0 && (
@@ -292,9 +315,19 @@ function JobRow({
         />
       </td>
 
-      {/* Company name + AI flag */}
+      {/* Company name + review badges */}
       <td className="py-3 px-3 w-[180px]">
         <div className="font-bold text-slate-900 text-xs leading-snug">{job.companyName}</div>
+        {/* Fallback badge — detail page had no content, only Telegram teaser data */}
+        {(!job.positions?.length && !job.detailContent) && (
+          <span
+            title="No detail page data — only the Telegram teaser was captured. Open Preview → Edit to fill in missing fields manually."
+            className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-orange-50 text-orange-700 border border-orange-200 cursor-help"
+          >
+            ⚠ Fallback
+          </span>
+        )}
+        {/* AI filled badge — one or more fields were filled by AI, worth checking */}
         {job.aiFilled?.length > 0 && (
           <span
             title={`AI filled: ${job.aiFilled.join(', ')} — review recommended`}
