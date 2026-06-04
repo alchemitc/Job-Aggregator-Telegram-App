@@ -202,6 +202,10 @@ const KNOWN_SECTION_HEADERS = [
   'find more details',
   'place of work',
   'place of work:',
+  'application process',
+  'application procedure',
+  'application address',
+  'application deadline',
 ];
 
 function isSectionHeader(text) {
@@ -272,6 +276,8 @@ function parseDetailPage(plainText, fallbackCompanyName) {
 
     if (
       clean.startsWith('how to apply') ||
+      clean.startsWith('application process') ||   // ← Mirab-style header
+      clean.startsWith('application procedure') ||
       clean === 'application'
     ) return 'apply';
 
@@ -373,29 +379,34 @@ function parseDetailPage(plainText, fallbackCompanyName) {
       continue;
     }
 
+    // --- Skip lines that are metadata noise at position level ---
+    // Salary and Quantity are per-position metadata that we don't store as
+    // structured fields (they vary per position). Skipping keeps them out
+    // of education/experience/skills by accident.
+    if (lower.startsWith('salary') || lower.startsWith('quantity')) {
+      continue;
+    }
+
     // --- Deadline ---
-    // Rule: absolute dates (containing a month name or DD/MM/YYYY) are always
-    // preferred over relative phrasing like "Ten days from announcement date".
-    // We collect both and pick the best one at the end.
-    if (lower.startsWith('deadline')) {
-      const raw = stripped.replace(/^deadline\s*[:\-–]?\s*/i, '').trim();
+    // Covers multiple formats used across different pages:
+    //   "Deadline : June 15th, 2026"        ← standard elelanajobs format
+    //   "Application Deadline: June 10, 2026"  ← Mirab Construction style
+    // Rule: absolute dates always preferred over relative phrasing.
+    if (lower.startsWith('deadline') || lower.startsWith('application deadline')) {
+      const raw = stripped.replace(/^(application\s+)?deadline\s*[:\-–]?\s*/i, '').trim();
       if (raw && raw.length > 2) {
         if (looksLikeAbsoluteDate(raw)) {
-          deadline = raw;         // absolute wins immediately
+          deadline = raw;
         } else if (!deadline) {
-          deadlineRel = raw;      // store relative as fallback only
+          deadlineRel = raw;
         }
         continue;
       }
     }
-    // "Deadline for all applications: [June 15/2026]" — these appear inside
-    // the How To Apply block. Extract absolute date if present, ignore relative.
+    // "Deadline for all applications: [June 15/2026]" — inside How To Apply block
     if (lower.includes('deadline for') || lower.includes('deadline date')) {
       const absDate = extractAbsoluteDateFromString(stripped);
-      if (absDate && !deadline) {
-        deadline = absDate;
-      }
-      // Always skip this line from being added to howToApply
+      if (absDate && !deadline) deadline = absDate;
       continue;
     }
     // "Registration Date: June 03 to June 09, 2026" — use the end date
@@ -403,16 +414,24 @@ function parseDetailPage(plainText, fallbackCompanyName) {
       const parts = stripped.split(/\bto\b/i);
       if (parts.length > 1) {
         const endDate = parts[parts.length - 1].trim().replace(/[.,\]]+$/, '');
-        if (looksLikeAbsoluteDate(endDate) && !deadline) {
-          deadline = endDate;
-        }
+        if (looksLikeAbsoluteDate(endDate) && !deadline) deadline = endDate;
       }
     }
 
+    // --- Application Address / Telephone — start or extend apply section ---
+    // "Application Address:" is a plain-text trigger (not bold) used by some
+    // pages (e.g. Mirab Construction) instead of a "How To Apply" header.
+    if (lower.startsWith('application address') || lower.startsWith('telephone')) {
+      currentSection = 'apply';
+      howToApply += (howToApply ? '\n' : '') + stripped;
+      continue;
+    }
+
     // --- Education ---
+    // Works regardless of which section we're in — Education: lines always
+    // belong to the current position if one is active.
     const educationValue = extractFieldValue(line, 'Education', 'Educational Requirement', 'Qualification');
     if (educationValue && currentPosition) {
-      // Append — sometimes education spans multiple lines
       currentPosition.education = currentPosition.education
         ? currentPosition.education + ' ' + educationValue
         : educationValue;
@@ -420,7 +439,12 @@ function parseDetailPage(plainText, fallbackCompanyName) {
     }
 
     // --- Experience ---
-    const experienceValue = extractFieldValue(line, 'Experience', 'Work Experience', 'Minimum Experience', 'Required Experience', 'Relevant Experience');
+    // "Work Experience:" is used by Mirab Construction; "Experience:" by most others.
+    const experienceValue = extractFieldValue(
+      line,
+      'Work Experience', 'Experience', 'Minimum Experience',
+      'Required Experience', 'Relevant Experience', 'Working Experience'
+    );
     if (experienceValue && currentPosition) {
       currentPosition.experience = currentPosition.experience
         ? currentPosition.experience + ' ' + experienceValue
