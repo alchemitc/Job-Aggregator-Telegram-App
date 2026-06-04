@@ -291,14 +291,22 @@ export const elelanajobsScraper = {
         return;
       }
 
-      // Cases D & E: regular HTTP links
-      const textIsAlreadyUrl = linkText.startsWith('http');
-      if (linkText && !textIsAlreadyUrl && linkText.toLowerCase() !== href.toLowerCase()) {
-        // Case D: vague CTA — show "TEXT: URL"
-        $(el).replaceWith(`${linkText}: ${href}`);
+      // Cases D & E: regular HTTP links.
+      //
+      // If the link text is meaningful (a real description, not a placeholder),
+      // show "Description: URL" so neither is lost.
+      // If the text is a generic filler word ("LINK", "here", "click", "this",
+      // "Apply", etc.) just show the URL — the generic word adds no value.
+      //
+      const textIsAlreadyUrl  = linkText.startsWith('http');
+      const textIsGenericWord = /^(link|here|click here|click|apply|apply here|this|form|application|this link|download|view|open)$/i.test(linkText.trim());
+
+      if (textIsAlreadyUrl || !linkText || textIsGenericWord) {
+        // Case E: show just the URL
+        $(el).replaceWith(href);
       } else {
-        // Case E: text is the URL or blank — just show the URL
-        $(el).replaceWith(href || linkText);
+        // Case D: meaningful CTA — show "TEXT: URL"
+        $(el).replaceWith(`${linkText}: ${href}`);
       }
     });
 
