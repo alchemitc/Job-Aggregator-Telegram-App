@@ -155,8 +155,47 @@ router.post('/post-telegram', async (req, res) => {
   res.json({ success: true, results });
 });
 
-// ---------------------------------------------------------------------------
-// GET /api/republish/:year/:month/:day/:slug
+// POST /api/jobs/:id/update
+// Manually update any fields of a job — used by the Edit tab in the preview modal.
+// Only the fields present in the request body are updated; everything else is kept.
+// Also regenerates the Telegram broadcast message from the updated data.
+router.post('/:id/update', (req, res) => {
+  const { id } = req.params;
+  const patch   = req.body;
+
+  const config = loadConfig();
+  const jobs   = loadJobs();
+  const index  = jobs.findIndex((j) => j.id === id);
+
+  if (index === -1) {
+    return res.status(404).json({ error: 'Job not found.' });
+  }
+
+  // Merge the patch into the existing job
+  const updated = { ...jobs[index], ...patch };
+
+  // Regenerate the flat jobPositions[] from positions[] if positions were edited
+  if (patch.positions?.length > 0) {
+    updated.jobPositions = patch.positions.map((p) => p.title).filter(Boolean);
+  }
+
+  // Regenerate the Telegram message with the updated data
+  updated.generatedMessage = generateTelegramMessage(
+    updated.companyName,
+    updated.jobPositions,
+    updated.deadline,
+    updated.sourceDate,
+    updated.slug,
+    config.domain
+  );
+
+  jobs[index] = updated;
+  saveJobs(jobs);
+
+  res.json({ success: true, job: updated });
+});
+
+
 // Fetch a single job record by its date-based URL path.
 // Used by the public-facing job detail page.
 // ---------------------------------------------------------------------------

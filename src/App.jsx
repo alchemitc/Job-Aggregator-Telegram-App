@@ -159,6 +159,13 @@ function Dashboard({ state }) {
           copiedHtmlId={state.copiedHtmlId}
           onCopy={state.copyToClipboard}
           onClose={() => state.setTelegramModalJob(null)}
+          onJobUpdated={(updatedJob) => {
+            // Update the job in the list and keep the modal open showing fresh data
+            state.setJobs((prev) =>
+              prev.map((j) => j.id === updatedJob.id ? updatedJob : j)
+            );
+            state.setTelegramModalJob(updatedJob);
+          }}
         />
       )}
 

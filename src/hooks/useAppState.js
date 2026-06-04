@@ -402,7 +402,7 @@ export function useAppState() {
     telegramChatId, setTelegramChatId,
     isSavingConfig, showSettings, setShowSettings,
     aiProviderInfo,
-    jobs, isLoadingJobs, filteredJobs,
+    jobs, setJobs, isLoadingJobs, filteredJobs,
     activeTab, setActiveTab,
     searchQuery, setSearchQuery,
     selectedJobIds, setSelectedJobIds,
