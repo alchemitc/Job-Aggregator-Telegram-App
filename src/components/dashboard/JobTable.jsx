@@ -287,9 +287,17 @@ function JobRow({
         />
       </td>
 
-      {/* Company name */}
+      {/* Company name + AI flag */}
       <td className="py-3 px-3 w-[180px]">
         <div className="font-bold text-slate-900 text-xs leading-snug">{job.companyName}</div>
+        {job.aiFilled?.length > 0 && (
+          <span
+            title={`AI filled: ${job.aiFilled.join(', ')} — review recommended`}
+            className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 text-[9px] font-bold rounded bg-amber-50 text-amber-700 border border-amber-200 cursor-help"
+          >
+            ✦ AI filled
+          </span>
+        )}
       </td>
 
       {/* Job positions */}
