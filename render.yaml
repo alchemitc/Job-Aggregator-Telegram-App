@@ -1,0 +1,33 @@
+# Render.com Blueprint — deploys the whole app (web UI + API + auto-crawl scheduler)
+# Deploy: Render Dashboard -> New + -> Blueprint -> pick this repo -> Apply
+# Then fill in the "sync: false" values (secrets) in the dashboard.
+
+services:
+  - type: web
+    name: job-aggregator
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # Your bot + destination channel (fill in dashboard after first deploy)
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHANNEL_ID
+        sync: false
+      # AI extraction — pick ONE provider, only its key is needed
+      - key: AI_PROVIDER
+        value: "gemini"
+      - key: GEMINI_API_KEY
+        sync: false
+      # Auto-crawl loop (runs inside the server, no cron needed)
+      - key: AUTO_CRAWL
+        value: "true"
+      - key: AUTO_CRAWL_INTERVAL_HOURS
+        value: "4"
+      # Set this to your onrender.com domain AFTER the first deploy
+      # (Settings panel in the admin UI also works)
+      - key: APP_DOMAIN
+        value: "localhost:3000"
