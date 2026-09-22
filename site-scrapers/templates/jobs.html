@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Latest Jobs in Ethiopia - EthioJobs Aggregator{% endblock %}
+
+{% block content %}
+<div class="search-wrap">
+    <form action="/" method="get">
+        <input type="text" name="q" placeholder="Search job title or company..." value="{{ q }}">
+        <input type="text" name="location" placeholder="Location" value="{{ location }}">
+        <button type="submit">Search Jobs</button>
+    </form>
+</div>
+
+<div class="wrap">
+    <div class="filter-row">
+        <a href="/" {% if not source %}class="active"{% endif %}>All Sources</a>
+        {% for key, site in sites.items() %}
+        <a href="/?source={{ key }}" {% if source == key %}class="active"{% endif %}>{{ site.name }}</a>
+        {% endfor %}
+    </div>
+
+    <div class="result-count">
+        Showing {{ jobs|length }} of {{ total }} jobs{% if q %} for "{{ q }}"{% endif %}
+    </div>
+
+    <ul class="job_listings">
+        {% for job in jobs %}
+        <li>
+            <a href="/job/{{ job.id }}">
+                <div class="position">
+                    <h3>{{ job.title or 'Untitled' }}</h3>
+                    <ul class="meta">
+                        {% if job.company %}<li class="company">{{ job.company }}</li>{% endif %}
+                        {% if job.location %}<li class="location">&#128205; {{ job.location }}</li>{% endif %}
+                        {% if job.deadline %}<li class="deadline">&#9203; Deadline: {{ job.deadline }}</li>{% endif %}
+                        {% if job.posted_date %}<li class="date">&#128337; {{ job.posted_date }}</li>{% endif %}
+                    </ul>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    {% if job.is_gov_exam %}<span class="expired-badge">Gov</span>{% endif %}
+                    <span class="source-badge">{{ job.source_site }}</span>
+                    {% if job.job_type %}<span class="job-type">{{ job.job_type }}</span>{% endif %}
+                </div>
+            </a>
+        </li>
+        {% else %}
+        <li>
+            <div style="padding: 40px; text-align: center; color: #999;">
+                No jobs found. <a href="/refresh" style="color:#2e9ad0;">Refresh jobs</a> to scrape the latest listings.
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+
+    {% if total_pages > 1 %}
+    <div class="pagination">
+        {% if page > 1 %}
+        <a href="/?page={{ page - 1 }}&q={{ q }}&location={{ location }}&source={{ source }}">&laquo; Prev</a>
+        {% endif %}
+        {% for p in range(1, total_pages + 1) %}
+            {% if p >= page - 3 and p <= page + 3 %}
+            {% if p == page %}
+            <span class="current">{{ p }}</span>
+            {% else %}
+            <a href="/?page={{ p }}&q={{ q }}&location={{ location }}&source={{ source }}">{{ p }}</a>
+            {% endif %}
+            {% endif %}
+        {% endfor %}
+        {% if page < total_pages %}
+        <a href="/?page={{ page + 1 }}&q={{ q }}&location={{ location }}&source={{ source }}">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

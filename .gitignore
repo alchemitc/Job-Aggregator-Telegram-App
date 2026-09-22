@@ -3,3 +3,9 @@ dist/
 .env
 *.log
 .DS_Store
+
+# Python (site-scrapers)
+__pycache__/
+*.pyc
+*.db
+.venv/

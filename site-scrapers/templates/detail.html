@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ job.title or 'Job' }} - EthioJobs Aggregator{% endblock %}
+
+{% block content %}
+<div class="wrap">
+    <a href="/" class="back-link">&larr; Back to all jobs</a>
+
+    <div class="job-detail-card">
+        <h1>{{ job.title or 'Untitled Job' }}</h1>
+
+        <div class="detail-meta">
+            {% if job.company %}
+            <span><strong>Company:</strong> {{ job.company }}</span>
+            {% endif %}
+            {% if job.location %}
+            <span><strong>Location:</strong> {{ job.location }}</span>
+            {% endif %}
+            {% if job.salary %}
+            <span><strong>Salary:</strong> {{ job.salary }}{% if job.salary_currency %} {{ job.salary_currency }}{% endif %}</span>
+            {% endif %}
+            {% if job.job_type %}
+            <span><strong>Type:</strong> {{ job.job_type }}</span>
+            {% endif %}
+            {% if job.category %}
+            <span><strong>Category:</strong> {{ job.category }}</span>
+            {% endif %}
+            {% if job.deadline %}
+            <span><strong>Deadline:</strong> {{ job.deadline }}</span>
+            {% endif %}
+            {% if job.posted_date %}
+            <span><strong>Posted:</strong> {{ job.posted_date }}</span>
+            {% endif %}
+            <span><strong>Source:</strong>
+                {% if job.source_url %}
+                <a href="{{ job.source_url }}" target="_blank" rel="noopener" style="color:#2e9ad0;">{{ job.source_site }}</a>
+                {% else %}
+                {{ job.source_site }}
+                {% endif %}
+            </span>
+        </div>
+
+        {% if not job.company %}<p class="not-specified" style="font-size:13px;">Company not listed by source</p>{% endif %}
+
+        {% if job.requirements %}
+        <div class="detail-section">
+            <h2>Requirements</h2>
+            <div class="text">{{ job.requirements }}</div>
+        </div>
+        {% endif %}
+
+        {% if job.description %}
+        <div class="detail-section">
+            <h2>Job Description</h2>
+            <div class="text">{{ job.description }}</div>
+        </div>
+        {% endif %}
+
+        {% if job.apply_url %}
+        <a href="{{ job.apply_url }}" target="_blank" rel="noopener" class="apply-btn">View &amp; Apply</a>
+        {% endif %}
+        {% if job.apply_method == 'email' %}
+        <p style="margin-top:14px; font-size:14px; color:#666;">Apply by email as instructed in the original posting.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

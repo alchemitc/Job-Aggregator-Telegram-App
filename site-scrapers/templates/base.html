@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}EthioJobs Aggregator - Latest Jobs in Ethiopia{% endblock %}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f4f4f4;
+            color: #333;
+            line-height: 1.5;
+        }
+        a { text-decoration: none; color: inherit; }
+
+        /* Header */
+        .site-header {
+            background: #fff;
+            border-bottom: 1px solid #e5e5e5;
+            padding: 18px 0;
+        }
+        .site-header .wrap {
+            max-width: 1040px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .site-title {
+            font-size: 22px;
+            font-weight: 700;
+            color: #222;
+        }
+        .site-title span { color: #2e9ad0; }
+        .site-nav a {
+            color: #666;
+            font-size: 14px;
+            margin-left: 20px;
+        }
+        .site-nav a:hover { color: #2e9ad0; }
+
+        /* Search bar */
+        .search-wrap {
+            background: #fff;
+            border-bottom: 1px solid #e5e5e5;
+            padding: 14px 0;
+        }
+        .search-wrap form {
+            max-width: 1040px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            gap: 8px;
+        }
+        .search-wrap input {
+            flex: 1;
+            padding: 10px 14px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-size: 14px;
+            color: #333;
+        }
+        .search-wrap input:focus { outline: none; border-color: #2e9ad0; }
+        .search-wrap button {
+            background: #2e9ad0;
+            color: #fff;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 3px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .search-wrap button:hover { background: #247fae; }
+
+        /* Layout */
+        .wrap { max-width: 1040px; margin: 0 auto; padding: 24px 20px 60px; }
+
+        /* Job list - Jobify style rows */
+        ul.job_listings { list-style: none; }
+        ul.job_listings li {
+            background: #fff;
+            border: 1px solid #e5e5e5;
+            margin-bottom: -1px;
+            position: relative;
+        }
+        ul.job_listings li a {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 18px 22px;
+            gap: 16px;
+        }
+        ul.job_listings li:hover { background: #fafafa; border-color: #d5d5d5; z-index: 2; }
+        .position h3 {
+            font-size: 16px;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        ul.job_listings li:hover h3 { color: #2e9ad0; }
+        ul.meta {
+            list-style: none;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+            font-size: 13px;
+            color: #999;
+        }
+        ul.meta li { display: inline-flex; align-items: center; gap: 4px; }
+        ul.meta .company { color: #777; }
+        .job-type {
+            flex-shrink: 0;
+            font-size: 12px;
+            font-weight: 600;
+            color: #777;
+            border: 1px solid #ddd;
+            padding: 4px 12px;
+            border-radius: 14px;
+            white-space: nowrap;
+        }
+        .source-badge {
+            flex-shrink: 0;
+            font-size: 11px;
+            font-weight: 600;
+            color: #2e9ad0;
+            background: #eaf4fa;
+            padding: 3px 10px;
+            border-radius: 10px;
+            white-space: nowrap;
+        }
+        .expired-badge {
+            flex-shrink: 0;
+            font-size: 11px;
+            font-weight: 600;
+            color: #c0392b;
+            background: #fdecea;
+            padding: 3px 10px;
+            border-radius: 10px;
+            white-space: nowrap;
+        }
+
+        /* Filters row */
+        .filter-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        .filter-row a {
+            font-size: 13px;
+            color: #666;
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            padding: 5px 14px;
+            border-radius: 3px;
+        }
+        .filter-row a.active, .filter-row a:hover {
+            color: #fff;
+            background: #2e9ad0;
+            border-color: #2e9ad0;
+        }
+        .result-count {
+            font-size: 13px;
+            color: #999;
+            margin-bottom: 14px;
+        }
+
+        /* Pagination */
+        .pagination {
+            display: flex;
+            gap: 6px;
+            justify-content: center;
+            margin-top: 24px;
+        }
+        .pagination a, .pagination span {
+            padding: 8px 14px;
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 3px;
+            font-size: 14px;
+            color: #2e9ad0;
+        }
+        .pagination span.current { background: #2e9ad0; color: #fff; border-color: #2e9ad0; }
+        .pagination a:hover { border-color: #2e9ad0; }
+
+        /* Detail page */
+        .job-detail-card {
+            background: #fff;
+            border: 1px solid #e5e5e5;
+            padding: 30px;
+        }
+        .job-detail-card h1 {
+            font-size: 24px;
+            color: #222;
+            margin-bottom: 6px;
+        }
+        .detail-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 18px;
+            font-size: 14px;
+            color: #777;
+            padding: 14px 0;
+            border-bottom: 1px solid #eee;
+            margin-bottom: 20px;
+        }
+        .detail-section h2 {
+            font-size: 16px;
+            font-weight: 700;
+            color: #333;
+            margin: 22px 0 10px;
+            padding-bottom: 6px;
+            border-bottom: 2px solid #eaf4fa;
+        }
+        .detail-section p, .detail-section div.text {
+            font-size: 15px;
+            color: #444;
+            white-space: pre-wrap;
+            line-height: 1.7;
+        }
+        .apply-btn {
+            display: inline-block;
+            background: #2e9ad0;
+            color: #fff;
+            padding: 12px 28px;
+            border-radius: 3px;
+            font-size: 15px;
+            font-weight: 600;
+            margin-top: 24px;
+        }
+        .apply-btn:hover { background: #247fae; }
+        .back-link {
+            display: inline-block;
+            font-size: 13px;
+            color: #999;
+            margin-bottom: 14px;
+        }
+        .back-link:hover { color: #2e9ad0; }
+        .not-specified { color: #bbb; }
+
+        /* Footer */
+        .site-footer {
+            background: #2b2b2b;
+            color: #aaa;
+            text-align: center;
+            padding: 22px 20px;
+            font-size: 13px;
+            margin-top: 40px;
+        }
+
+        /* Refresh bar */
+        .refresh-bar {
+            max-width: 1040px;
+            margin: 0 auto;
+            padding: 0 20px 16px;
+            display: flex;
+            justify-content: flex-end;
+        }
+        .refresh-bar button {
+            background: #fff;
+            border: 1px solid #ddd;
+            color: #666;
+            padding: 6px 14px;
+            border-radius: 3px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .refresh-bar button:hover { border-color: #2e9ad0; color: #2e9ad0; }
+    </style>
+</head>
+<body>
+    <header class="site-header">
+        <div class="wrap">
+            <a href="/" class="site-title">EthioJobs<span>Aggregator</span></a>
+            <nav class="site-nav">
+                <a href="/">Jobs</a>
+                <a href="/refresh" title="Run scrapers now">Refresh Jobs</a>
+            </nav>
+        </div>
+    </header>
+
+    {% block content %}{% endblock %}
+
+    <footer class="site-footer">
+        EthioJobs Aggregator &mdash; jobs aggregated from Ethiopian job sites. Salary and details shown only when listed by the source.
+    </footer>
+</body>
+</html>
