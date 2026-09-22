@@ -12,6 +12,8 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20"
+      - key: NODE_ENV
+        value: "production"
       # Your bot + destination channel (fill in dashboard after first deploy)
       - key: TELEGRAM_BOT_TOKEN
         sync: false

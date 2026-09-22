@@ -10,13 +10,14 @@
 
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { scrubExternalMentions, cleanEscapedNewlines } from './text-utils.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// Both files live in /data relative to the project root (two levels up from here)
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+// Data lives in /data relative to the project root (process.cwd()).
+// We deliberately do NOT use import.meta.url/__dirname here: in the
+// production esbuild bundle those resolve inside dist/, which would put
+// the data files in the wrong place. npm always runs scripts with
+// cwd = project root, both in dev and on hosting platforms.
+const DATA_DIR = path.join(process.cwd(), 'data');
 const JOBS_FILE = path.join(DATA_DIR, 'jobs.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 

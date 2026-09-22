@@ -4,7 +4,6 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 
 import { ensureDataFilesExist, repairDatabase } from './server/lib/db.js';
@@ -15,8 +14,9 @@ import configRouter  from './server/routes/config.js';
 import jobsRouter    from './server/routes/jobs.js';
 import scraperRouter from './server/routes/scraper.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
+// NOTE: paths are anchored to process.cwd() (the project root) instead of
+// import.meta.url because the production bundle lives in dist/ — file-relative
+// paths would resolve to dist/dist/... and break in production.
 
 const app  = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -73,7 +73,7 @@ async function startServer() {
     app.use(vite.middlewares);
     console.log('[server] Vite dev middleware active');
   } else {
-    const distPath = path.join(__dirname, 'dist');
+    const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
     console.log(`[server] Serving static from ${distPath}`);
