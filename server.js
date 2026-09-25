@@ -58,7 +58,13 @@ app.use('/api/config',   configRouter);
 app.use('/api/jobs',     jobsRouter);
 app.use('/api/scrapers', scraperRouter);
 app.use('/api/scrape',   scraperRouter);
-app.use('/api/republish', jobsRouter);
+
+// Any unmatched /api/* request must return JSON 404 — NEVER fall through to
+// the SPA catch-all, which would serve index.html and crash client-side
+// response.json() with "Unexpected token '<'".
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: `API route not found: ${req.method} ${req.originalUrl}` });
+});
 
 // ---------------------------------------------------------------------------
 // Frontend serving

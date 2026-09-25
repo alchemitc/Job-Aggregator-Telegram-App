@@ -17,7 +17,7 @@ export default function PublicJobPage({ routeParams, domainConfig, onNavigate })
     setIsLoading(true);
     setError(null);
 
-    fetch(`/api/republish/${year}/${month}/${day}/${slug}`)
+    fetch(`/api/jobs/republish/${year}/${month}/${day}/${slug}`)
       .then((res) => { if (!res.ok) throw new Error('Job listing not found.'); return res.json(); })
       .then(setJob)
       .catch((err) => setError(err.message))
