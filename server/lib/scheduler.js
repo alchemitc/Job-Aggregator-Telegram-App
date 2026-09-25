@@ -1,11 +1,12 @@
 // server/lib/scheduler.js
 //
 // Automatic background crawler.
-// Every N hours (AUTO_CRAWL_INTERVAL_HOURS, default 4):
-//   1. Fetch the Telegram channel preview page
+// Every N hours (AUTO_CRAWL_INTERVAL_HOURS, default 4) it crawls EVERY
+// channel registered in server/scrapers/index.js:
+//   1. Fetch the Telegram channel preview page (public t.me/s/ — no token)
 //   2. Filter to only messages newer than the saved checkpoint
 //   3. Ingest and parse each new job (same pipeline as manual ingest)
-//   4. Save the checkpoint so next run skips already-seen messages
+//   4. Save the per-channel checkpoint so the next run skips seen messages
 //
 // Auto-crawl does NOT post to Telegram — posting always requires
 // manual approval from the admin panel.
@@ -15,8 +16,8 @@
 
 import * as cheerio from 'cheerio';
 import { loadJobs, loadConfig, saveJobs, saveConfig } from './db.js';
-import { buildJobRecord } from './job-builder.js';
-import { getScraperById } from '../scrapers/index.js';
+import { buildJobRecord, generateTelegramMessage } from './job-builder.js';
+import { SCRAPERS } from '../scrapers/index.js';
 
 const BROWSER_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -44,50 +45,66 @@ async function runCrawlCycle() {
   }
 
   state.isRunning = true;
-  console.log('[scheduler] Starting auto-crawl…');
+  console.log(`[scheduler] Starting auto-crawl — ${SCRAPERS.length} channel(s)…`);
 
   let newJobCount = 0;
-  let highestId   = 0;
-  let lastSeenId  = 0;
+  const perChannel = {};
 
-  try {
-    const scraper = getScraperById('elelanajobs');
-    if (!scraper) throw new Error('elelanajobs scraper not registered');
-
-    // Fetch the channel preview page
-    const response = await fetch(scraper.channelUrl, {
-      headers: { 'User-Agent': BROWSER_USER_AGENT },
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status} from ${scraper.channelUrl}`);
-
-    const html     = await response.text();
-    const $        = cheerio.load(html);
-    const allItems = scraper.parseTelegramHtml($);
-
-    // Load the checkpoint — highest message ID already processed
-    const cfg     = loadConfig();
-    lastSeenId    = cfg.lastSeenMessageId?.['elelanajobs'] || 0;
-    highestId     = allItems.reduce((max, item) => Math.max(max, item.messageId || 0), 0);
-
-    // Only process messages newer than the checkpoint
-    const newItems = allItems.filter((item) => (item.messageId || 0) > lastSeenId);
-
-    console.log(
-      `[scheduler] ${allItems.length} total, ${newItems.length} new ` +
-      `(checkpoint: #${lastSeenId}, highest: #${highestId})`
-    );
-
-    if (newItems.length === 0) {
-      console.log('[scheduler] No new posts — checkpoint up to date.');
-      // Still advance checkpoint in case we saw higher IDs with no job links
-      saveCheckpoint('elelanajobs', highestId, lastSeenId);
-      state.isRunning    = false;
-      state.lastRunAt    = new Date().toISOString();
-      state.lastRunCount = 0;
-      return;
+  for (const scraper of SCRAPERS) {
+    try {
+      const count      = await crawlChannel(scraper);
+      perChannel[scraper.id] = count;
+      newJobCount     += count;
+    } catch (err) {
+      perChannel[scraper.id] = `error: ${err.message}`;
+      console.error(`[scheduler] [${scraper.id}] Crawl failed:`, err.message);
     }
 
-    // Ingest each new job URL
+    // Small polite delay between channels
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+
+  state.isRunning    = false;
+  state.lastRunAt    = new Date().toISOString();
+  state.lastRunCount = newJobCount;
+  console.log(`[scheduler] Cycle complete — ${newJobCount} new job(s) ingested.`, perChannel);
+}
+
+/**
+ * Crawl a single Telegram channel: fetch preview, filter by checkpoint,
+ * ingest new messages, advance the checkpoint (in `finally` — always).
+ * @returns {number} how many new jobs were ingested
+ */
+async function crawlChannel(scraper) {
+  // Fetch the channel preview page
+  const response = await fetch(scraper.channelUrl, {
+    headers: { 'User-Agent': BROWSER_USER_AGENT },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status} from ${scraper.channelUrl}`);
+
+  const html     = await response.text();
+  const $        = cheerio.load(html);
+  const allItems = scraper.parseTelegramHtml($);
+
+  // Load the checkpoint — highest message ID already processed for THIS channel
+  const cfg        = loadConfig();
+  const lastSeenId = cfg.lastSeenMessageId?.[scraper.id] || 0;
+  const highestId  = allItems.reduce((max, item) => Math.max(max, item.messageId || 0), 0);
+
+  const newItems = allItems.filter((item) => (item.messageId || 0) > lastSeenId);
+
+  console.log(
+    `[scheduler] [${scraper.id}] ${allItems.length} total, ${newItems.length} new ` +
+    `(checkpoint: #${lastSeenId}, highest: #${highestId})`
+  );
+
+  let ingested = 0;
+  try {
+    if (newItems.length === 0) {
+      console.log(`[scheduler] [${scraper.id}] No new posts — checkpoint up to date.`);
+      return 0;
+    }
+
     const appConfig = loadConfig();
 
     for (const item of newItems) {
@@ -97,7 +114,32 @@ async function runCrawlCycle() {
         if (alreadyActive) continue;
 
         try {
-          const jobRecord   = await buildJobRecord(url, item.text, scraper, appConfig);
+          const jobRecord = await buildJobRecord(url, item.text, scraper, appConfig, item);
+
+          // Guard against id collisions (same date + same company slug from a
+          // different source message): suffix the id/slug with the message id
+          // so both jobs survive and their public pages stay distinct.
+          const jobsNow = loadJobs();
+          if (jobsNow.some((j) => j.id === jobRecord.id && j.sourceUrl !== url)) {
+            const slugBase = jobRecord.slug;
+            const suffix  = item.messageId ? `-${item.messageId}` : `-x${Date.now() % 10_000}`;
+            let slugCandidate = `${slugBase}${suffix}`;
+            let n = 2;
+            while (jobsNow.some((j) => j.id === `${jobRecord.sourceDate.replace(/\//g, '-')}-${slugCandidate}`)) {
+              slugCandidate = `${slugBase}${suffix}-${n++}`;
+            }
+            jobRecord.slug = slugCandidate;
+            jobRecord.id   = `${jobRecord.sourceDate.replace(/\//g, '-')}-${slugCandidate}`;
+            jobRecord.generatedMessage = generateTelegramMessage(
+              jobRecord.companyName,
+              jobRecord.jobPositions,
+              jobRecord.deadline,
+              jobRecord.sourceDate,
+              jobRecord.slug,
+              appConfig.domain
+            );
+          }
+
           const freshJobs   = loadJobs();
           const existingIdx = freshJobs.findIndex((j) => j.sourceUrl === url);
 
@@ -108,24 +150,22 @@ async function runCrawlCycle() {
           }
 
           saveJobs(freshJobs);
-          newJobCount++;
-          console.log(`[scheduler] Ingested: ${jobRecord.companyName}`);
+          ingested++;
+          console.log(
+            `[scheduler] [${scraper.id}] Ingested: ${jobRecord.companyName}` +
+            (jobRecord.jobPositions.length ? ` — ${jobRecord.jobPositions.join(', ')}` : '')
+          );
         } catch (err) {
-          console.error(`[scheduler] Failed to ingest ${url}:`, err.message);
+          console.error(`[scheduler] [${scraper.id}] Failed to ingest ${url}:`, err.message);
         }
       }
     }
-  } catch (err) {
-    console.error('[scheduler] Crawl cycle error:', err.message);
   } finally {
     // Always advance the checkpoint after a run, even if some ingests failed
-    saveCheckpoint('elelanajobs', highestId, lastSeenId);
-
-    state.isRunning    = false;
-    state.lastRunAt    = new Date().toISOString();
-    state.lastRunCount = newJobCount;
-    console.log(`[scheduler] Cycle complete — ${newJobCount} new job(s) ingested.`);
+    saveCheckpoint(scraper.id, highestId, lastSeenId);
   }
+
+  return ingested;
 }
 
 /**

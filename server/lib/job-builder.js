@@ -365,12 +365,17 @@ function parseDetailPage(plainText, fallbackCompanyName) {
       // Some pages put content on the SAME LINE as the section header label,
       // e.g. "**Application Link**: https://rammisbank.et/jobs"
       // Strip the bold label and colon, then store whatever is left.
+      // A bare header like "**How to Apply**" (no colon, no inline value)
+      // must NOT add its own label text to the apply content.
       if (sectionType === 'apply') {
-        const afterLabel = stripped
-          .replace(/^[\w\s&]+[:\-–]\s*/i, '')  // strip "Application Link: "
-          .trim();
-        if (afterLabel && afterLabel.length > 1) {
-          howToApply += (howToApply ? '\n' : '') + afterLabel;
+        const hasInlineLabel = /^[\w\s&]+\s*[:\-–]\s*/.test(stripped);
+        if (hasInlineLabel) {
+          const afterLabel = stripped
+            .replace(/^[\w\s&]+\s*[:\-–]\s*/i, '')  // strip "Application Link: "
+            .trim();
+          if (afterLabel && afterLabel.length > 1) {
+            howToApply += (howToApply ? '\n' : '') + afterLabel;
+          }
         }
       }
       continue;
@@ -674,16 +679,40 @@ ${rawPageText.substring(0, 4000)}
 // Main export
 // ---------------------------------------------------------------------------
 
-async function buildJobRecord(url, fallbackText, scraper, config) {
-  const sourceDate   = scraper.extractSourceDate(url);
-  const fallbackName = extractCompanyNameFromTelegram(fallbackText || '');
+async function buildJobRecord(url, fallbackText, scraper, config, item = {}) {
+  // Message-only channels (e.g. hahujobs) have unparseable SPA detail pages —
+  // the Telegram message text itself is the content. The URL is still stored
+  // as sourceUrl (dedup key + "original posting" link) but never fetched.
+  const messageOnly = !!scraper.messageOnly;
 
-  const pageText    = await fetchDetailPageText(url, scraper);
-  const hasPageText = pageText.length > 100;
+  const sourceDate =
+    messageOnly && item.messageDate && isoToDatePath(item.messageDate)
+      ? isoToDatePath(item.messageDate)
+      : scraper.extractSourceDate(url);
 
-  console.log(`[job-builder] Page text: ${pageText.length} chars — ${url}`);
+  // Channels that know their own company-name convention (e.g. hashtags)
+  // can extract it themselves; otherwise fall back to the generic heuristic.
+  const fallbackName =
+    typeof scraper.extractCompanyName === 'function'
+      ? scraper.extractCompanyName(fallbackText || '') || extractCompanyNameFromTelegram(fallbackText || '')
+      : extractCompanyNameFromTelegram(fallbackText || '');
 
-  const contentToParse = hasPageText ? pageText : fallbackText || '';
+  let contentToParse;
+  if (messageOnly) {
+    contentToParse =
+      typeof scraper.normalizeMessageText === 'function'
+        ? scraper.normalizeMessageText(fallbackText || '', item)
+        : fallbackText || '';
+    console.log(`[job-builder] Message-only ingest (${contentToParse.length} chars) — ${url}`);
+  } else {
+    const pageText    = await fetchDetailPageText(url, scraper);
+    const hasPageText = pageText.length > 100;
+
+    console.log(`[job-builder] Page text: ${pageText.length} chars — ${url}`);
+
+    contentToParse = hasPageText ? pageText : fallbackText || '';
+  }
+
   let parsed = parseDetailPage(contentToParse, fallbackName);
 
   // AI gap-fill for any empty critical fields
@@ -720,6 +749,7 @@ async function buildJobRecord(url, fallbackText, scraper, config) {
 
   // Sanitize all string fields
   for (const key of Object.keys(jobRecord)) {
+    if (key === 'sourceUrl') continue; // NEVER scrub — dedup + "original posting" link depend on it
     if (typeof jobRecord[key] === 'string') {
       jobRecord[key] = scrubExternalMentions(cleanEscapedNewlines(jobRecord[key]));
     }
@@ -766,6 +796,16 @@ function extractCompanyNameFromTelegram(text) {
   }
 
   return 'Unknown Company';
+}
+
+/** '2026-09-25T05:33:57+00:00' → '2026/09/25' (UTC) — '' if unparseable */
+function isoToDatePath(iso) {
+  const d = new Date(iso);
+  if (!iso || isNaN(d.getTime())) return '';
+  const year  = d.getUTCFullYear();
+  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day   = String(d.getUTCDate()).padStart(2, '0');
+  return `${year}/${month}/${day}`;
 }
 
 export { buildJobRecord, generateTelegramMessage };

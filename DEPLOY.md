@@ -33,6 +33,12 @@ internal scheduler can't run and `data/jobs.json` would be wiped. Render
 Reading/ingesting channels does **NOT** need any token — the crawler reads
 public `t.me/s/...` preview pages.
 
+**Channels crawled:** every scraper registered in `server/scrapers/index.js`
+(currently `elelanajobs` and `hahujobs`, Ethiopia's largest job channel).
+Each channel keeps its own checkpoint, so one failing channel never blocks
+the others. Posts whose detail page is a client-rendered SPA (hahu.jobs) are
+parsed directly from the Telegram message text instead of the website.
+
 ## How the loop runs (no cron, no GitHub Actions)
 
 - The server schedules itself: on boot it runs a crawl in ~10s, then every

@@ -93,6 +93,17 @@ telegram-job-scraper/
 
 ## Adding a New Scraper
 
+The scheduler crawls **every** scraper registered in `server/scrapers/index.js`
+on each cycle, with an independent per-channel checkpoint.
+
+Two kinds of channels:
+
+1. **Detail-page channels** (like elelanajobs) — messages link to a
+   server-rendered website whose pages can be parsed with cheerio.
+2. **Message-only channels** (like hahujobs) — the linked site is a client-rendered
+   SPA, so the channel message itself is the content. Set `messageOnly: true` and
+   provide `normalizeMessageText()` to map the message into labelled lines.
+
 Create `server/scrapers/mynewscraper/index.js`:
 
 ```js
@@ -101,9 +112,12 @@ export const myNewScraper = {
   name: 'My New Jobs',
   channelUrl: 'https://t.me/s/mynewjobs',
   domainKeyword: 'mynewjobs.com',
+  // messageOnly: true,                       // for message-only channels
   extractSourceDate(url) { /* ... */ },
   parseTelegramHtml($) { /* ... */ },
-  cleanHtmlBody($) { /* ... */ },
+  cleanHtmlBody($) { /* ... */ },            // detail-page channels only
+  // normalizeMessageText(text, item) { ... } // message-only channels only
+  // extractCompanyName(text) { ... }         // optional: better company heuristic
 };
 ```
 
@@ -111,5 +125,5 @@ Then add it to `server/scrapers/index.js`:
 
 ```js
 import { myNewScraper } from './mynewscraper/index.js';
-export const SCRAPERS = [elelanajobsScraper, myNewScraper];
+export const SCRAPERS = [elelanajobsScraper, hahujobsScraper, myNewScraper];
 ```
