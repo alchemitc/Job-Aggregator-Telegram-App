@@ -70,7 +70,7 @@ async function callGemini(prompt) {
   const ai = new GoogleGenAI({ apiKey, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
 
   const aiResponse = await ai.models.generateContent({
-    model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
+    model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
     contents: prompt,
     config: {
       responseMimeType: 'application/json',
@@ -196,7 +196,7 @@ function detectProvider() {
 export function getProviderInfo() {
   const provider = (process.env.AI_PROVIDER || '').toLowerCase() || detectProvider();
   const models = {
-    gemini: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
+    gemini: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
     openai: process.env.OPENAI_MODEL || 'gpt-4o-mini',
     groq: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
     openrouter: process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.1-8b-instruct:free',
