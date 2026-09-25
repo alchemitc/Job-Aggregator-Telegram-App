@@ -128,11 +128,20 @@ router.post('/post-telegram', async (req, res) => {
         results.push({ id: job.id, companyName: job.companyName, success: true });
       } else {
         const errorJson = await telegramResponse.json().catch(() => ({}));
+        const reason = errorJson.description || telegramResponse.statusText || 'Unknown error';
+        console.error(`[telegram] FAILED "${job.companyName}" — HTTP ${telegramResponse.status}: ${reason}`);
+        if (telegramResponse.status === 401) {
+          console.error('[telegram] Hint: bot token is invalid or revoked — re-copy it from @BotFather (no spaces/newlines).');
+        } else if (/chat not found/i.test(reason)) {
+          console.error('[telegram] Hint: TELEGRAM_CHANNEL_ID wrong — public channels need the @ prefix (e.g. @sirajobsofficial).');
+        } else if (/not enough rights|not a member|blocked/i.test(reason)) {
+          console.error('[telegram] Hint: bot must be an ADMIN of THIS channel with "Post Messages" permission.');
+        }
         results.push({
           id: job.id,
           companyName: job.companyName,
           success: false,
-          error: errorJson.description || telegramResponse.statusText,
+          error: reason,
         });
       }
     } catch (networkError) {
